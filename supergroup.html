@@ -68,7 +68,8 @@
                 const data = parseCSV(text);
                 const tableBody = document.getElementById("talks-table-body");
   
-                data.forEach(([date, title, speaker, room]) => {
+                // Skip the first row (header) and start from index 1
+                data.slice(1).forEach(([date, title, speaker, room]) => {
                   // Only create a row if the title is not empty
                   if (title && title.trim() !== "") {
                     const row = document.createElement("tr");
