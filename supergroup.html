@@ -69,25 +69,28 @@
                 const tableBody = document.getElementById("talks-table-body");
   
                 data.forEach(([date, title, speaker, room]) => {
-                  const row = document.createElement("tr");
-                  
-                  const dateCell = document.createElement("td");
-                  dateCell.textContent = date;
-                  row.appendChild(dateCell);
-                  
-                  const titleCell = document.createElement("td");
-                  titleCell.textContent = title;
-                  row.appendChild(titleCell);
-                  
-                  const speakerCell = document.createElement("td");
-                  speakerCell.textContent = speaker;
-                  row.appendChild(speakerCell);
-                  
-                  const roomCell = document.createElement("td");
-                  roomCell.textContent = room;
-                  row.appendChild(roomCell);
-                  
-                  tableBody.appendChild(row);
+                  // Only create a row if the title is not empty
+                  if (title && title.trim() !== "") {
+                    const row = document.createElement("tr");
+                    
+                    const dateCell = document.createElement("td");
+                    dateCell.textContent = date;
+                    row.appendChild(dateCell);
+                    
+                    const titleCell = document.createElement("td");
+                    titleCell.textContent = title;
+                    row.appendChild(titleCell);
+                    
+                    const speakerCell = document.createElement("td");
+                    speakerCell.textContent = speaker;
+                    row.appendChild(speakerCell);
+                    
+                    const roomCell = document.createElement("td");
+                    roomCell.textContent = room;
+                    row.appendChild(roomCell);
+                    
+                    tableBody.appendChild(row);
+                  }
                 });
               })
               .catch(error => console.error("Error loading CSV:", error));
