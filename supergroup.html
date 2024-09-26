@@ -36,6 +36,7 @@
                   <th>Date</th>
                   <th>Title</th>
                   <th>Speaker</th>
+                  <th>Room</th>
                 </tr>
               </thead>
               <tbody id="talks-table-body">
@@ -67,7 +68,7 @@
                 const data = parseCSV(text);
                 const tableBody = document.getElementById("talks-table-body");
   
-                data.forEach(([date, title, speaker]) => {
+                data.forEach(([date, title, speaker, room]) => {
                   const row = document.createElement("tr");
                   
                   const dateCell = document.createElement("td");
@@ -81,6 +82,10 @@
                   const speakerCell = document.createElement("td");
                   speakerCell.textContent = speaker;
                   row.appendChild(speakerCell);
+                  
+                  const roomCell = document.createElement("td");
+                  roomCell.textContent = room;
+                  row.appendChild(roomCell);
                   
                   tableBody.appendChild(row);
                 });
