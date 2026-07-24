@@ -1,0 +1,3073 @@
+<!doctype html>
+<html lang="en" data-theme="radix-dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>GNN Interpretation Trace Viewer</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+  <style>
+    :root {
+      --panel: color-mix(in oklab, var(--color-base-200) 88%, transparent);
+      --panel-border: color-mix(in oklab, var(--color-base-content) 16%, transparent);
+      --muted: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+      --edge: color-mix(in oklab, var(--color-base-content) 25%, transparent);
+      --focus: var(--color-info);
+    }
+
+    html[data-theme="radix-dark"] {
+      color-scheme: dark;
+
+      /* Radix Slate Dark */
+      --radix-slate-1: #111113;
+      --radix-slate-2: #18191b;
+      --radix-slate-3: #212225;
+      --radix-slate-4: #272a2d;
+      --radix-slate-5: #2e3135;
+      --radix-slate-6: #363a3f;
+      --radix-slate-7: #43484e;
+      --radix-slate-8: #5a6169;
+      --radix-slate-9: #696e77;
+      --radix-slate-10: #777b84;
+      --radix-slate-11: #b0b4ba;
+      --radix-slate-12: #edeef0;
+
+      /* Radix Indigo, Blue, Cyan, Orange, Green, Amber, and Red Dark */
+      --radix-indigo-7: #3a4f97;
+      --radix-indigo-8: #435db1;
+      --radix-indigo-9: #3e63dd;
+      --radix-indigo-10: #5472e4;
+      --radix-indigo-11: #9eb1ff;
+      --radix-indigo-12: #d6e1ff;
+      --radix-blue-9: #0090ff;
+      --radix-blue-11: #70b8ff;
+      --radix-cyan-9: #00a2c7;
+      --radix-cyan-11: #4ccce6;
+      --radix-orange-9: #f76b15;
+      --radix-orange-11: #ffa057;
+      --radix-green-9: #30a46c;
+      --radix-green-11: #3dd68c;
+      --radix-amber-9: #ffc53d;
+      --radix-amber-11: #f5d90a;
+      --radix-lime-9: #bdee63;
+      --radix-red-9: #e5484d;
+      --radix-red-11: #ff9592;
+
+      /* daisyUI aliases, pinned so the page cannot fall back to light mode */
+      --color-base-100: var(--radix-slate-2);
+      --color-base-200: var(--radix-slate-3);
+      --color-base-300: var(--radix-slate-1);
+      --color-base-content: var(--radix-slate-12);
+      --color-primary: var(--radix-indigo-9);
+      --color-primary-content: #ffffff;
+      --color-secondary: var(--radix-cyan-9);
+      --color-secondary-content: var(--radix-slate-1);
+      --color-accent: var(--radix-orange-9);
+      --color-accent-content: var(--radix-slate-1);
+      --color-neutral: var(--radix-slate-5);
+      --color-neutral-content: var(--radix-slate-12);
+      --color-info: var(--radix-blue-9);
+      --color-info-content: #ffffff;
+      --color-success: var(--radix-green-9);
+      --color-success-content: var(--radix-slate-1);
+      --color-warning: var(--radix-amber-9);
+      --color-warning-content: var(--radix-slate-1);
+      --color-error: var(--radix-red-9);
+      --color-error-content: #ffffff;
+      --radius-selector: 0.5rem;
+      --radius-field: 0.5rem;
+      --radius-box: 0.75rem;
+      --border: 1px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 52% 45%, color-mix(in oklab, var(--radix-indigo-9) 11%, transparent), transparent 38%),
+        var(--color-base-300);
+      color: var(--color-base-content);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    button:focus-visible,
+    select:focus-visible,
+    .graph-node:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 3px;
+    }
+
+    #app,
+    #graph {
+      position: fixed;
+      inset: 0;
+    }
+
+    #graph {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    #graph:active {
+      cursor: grabbing;
+    }
+
+    .background-grid {
+      pointer-events: none;
+      color: var(--radix-slate-8);
+      opacity: 0.13;
+    }
+
+    .top-overlay {
+      position: fixed;
+      z-index: 20;
+      top: 14px;
+      left: 50%;
+      width: min(1160px, calc(100vw - 28px));
+      transform: translateX(-50%);
+      padding: 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 18px 50px rgb(0 0 0 / 0.28);
+      backdrop-filter: blur(18px) saturate(135%);
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .stage-slider-wrap {
+      --stage-progress: 0%;
+      --stage-ratio: 0;
+      position: relative;
+      min-width: 0;
+      height: 46px;
+      padding: 21px 10px 0;
+    }
+
+    .stage-bubble {
+      position: absolute;
+      z-index: 4;
+      top: -2px;
+      left: calc(10px + (100% - 20px) * var(--stage-ratio));
+      min-width: 58px;
+      padding: 3px 8px;
+      border: 1px solid color-mix(in oklab, var(--color-primary) 55%, var(--panel-border));
+      border-radius: 999px;
+      background: var(--color-primary);
+      box-shadow: 0 5px 14px color-mix(in oklab, var(--color-primary) 25%, transparent);
+      color: var(--color-primary-content);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.15;
+      text-align: center;
+      white-space: nowrap;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .stage-ticks {
+      position: absolute;
+      z-index: 1;
+      inset: 30px 10px auto;
+      height: 8px;
+      pointer-events: none;
+    }
+
+    .stage-tick {
+      position: absolute;
+      top: 50%;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: color-mix(in oklab, var(--color-base-content) 34%, transparent);
+      transform: translate(-50%, -50%);
+      transition: width 120ms ease, height 120ms ease, background 120ms ease;
+    }
+
+    .stage-tick.is-passed {
+      background: var(--color-primary);
+    }
+
+    .stage-tick.is-current {
+      width: 8px;
+      height: 8px;
+      background: var(--color-primary-content);
+      box-shadow: 0 0 0 2px var(--color-primary);
+    }
+
+    .stage-slider {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 20px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      appearance: none;
+      background: transparent;
+      box-shadow: none;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .stage-slider:focus,
+    .stage-slider:focus-visible {
+      border: 0;
+      box-shadow: none;
+      outline: none;
+    }
+
+    .stage-slider:disabled {
+      cursor: default;
+      opacity: 0.65;
+    }
+
+    .stage-slider::-webkit-slider-runnable-track {
+      height: 6px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background:
+        linear-gradient(
+          to right,
+          var(--color-primary) 0 var(--stage-progress),
+          color-mix(in oklab, var(--color-base-content) 18%, transparent) var(--stage-progress) 100%
+        );
+    }
+
+    .stage-slider::-webkit-slider-thumb {
+      width: 20px;
+      height: 20px;
+      margin-top: -8px;
+      border: 3px solid var(--color-primary-content);
+      border-radius: 50%;
+      appearance: none;
+      background: var(--color-primary);
+      box-shadow: 0 0 0 2px var(--color-primary), 0 4px 12px rgb(0 0 0 / 0.28);
+    }
+
+    .stage-slider:focus-visible::-webkit-slider-thumb {
+      box-shadow:
+        0 0 0 2px var(--color-primary),
+        0 0 0 5px color-mix(in oklab, var(--color-primary) 28%, transparent),
+        0 4px 12px rgb(0 0 0 / 0.28);
+    }
+
+    .stage-slider::-moz-range-track {
+      height: 6px;
+      border: 1px solid var(--panel-border);
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--color-base-content) 18%, transparent);
+    }
+
+    .stage-slider::-moz-range-progress {
+      height: 6px;
+      border-radius: 999px;
+      background: var(--color-primary);
+    }
+
+    .stage-slider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border: 3px solid var(--color-primary-content);
+      border-radius: 50%;
+      background: var(--color-primary);
+      box-shadow: 0 0 0 2px var(--color-primary), 0 4px 12px rgb(0 0 0 / 0.28);
+    }
+
+    .stage-slider:focus-visible::-moz-range-thumb {
+      box-shadow:
+        0 0 0 2px var(--color-primary),
+        0 0 0 5px color-mix(in oklab, var(--color-primary) 28%, transparent),
+        0 4px 12px rgb(0 0 0 / 0.28);
+    }
+
+    .meta-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      margin-top: 8px;
+      padding: 0 2px;
+    }
+
+    #trace-meta {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .mode-control {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .mode-control .select {
+      width: 126px;
+      min-height: 30px;
+      height: 30px;
+    }
+
+    .corner-tools {
+      position: fixed;
+      z-index: 12;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+    }
+
+    .display-panel {
+      position: fixed;
+      z-index: 14;
+      top: 126px;
+      bottom: 16px;
+      left: 16px;
+      display: flex;
+      width: 190px;
+      min-height: 180px;
+      flex-direction: column;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: 0 14px 42px rgb(0 0 0 / 0.28);
+      backdrop-filter: blur(16px) saturate(135%);
+      overflow: hidden;
+    }
+
+    .feature-panel {
+      left: 216px;
+      display: none;
+    }
+
+    .feature-panel.is-visible {
+      display: flex;
+    }
+
+    #gradient-mode.is-active {
+      border-color: var(--radix-cyan-9);
+      background: color-mix(in oklab, var(--radix-cyan-9) 26%, var(--radix-slate-4));
+      color: var(--radix-cyan-11);
+    }
+
+    .display-panel-head {
+      padding: 12px 12px 9px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .display-panel-title {
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .display-panel-help {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.3;
+    }
+
+    .display-options {
+      display: flex;
+      min-height: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: 3px;
+      padding: 8px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    .display-section-label {
+      padding: 7px 7px 3px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .display-option {
+      display: flex;
+      width: 100%;
+      min-height: 29px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 5px 8px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--radix-slate-11);
+      cursor: pointer;
+      font-size: 11px;
+      text-align: left;
+    }
+
+    .display-option:hover {
+      border-color: var(--radix-slate-6);
+      background: var(--radix-slate-4);
+      color: var(--radix-slate-12);
+    }
+
+    .display-option.is-active {
+      border-color: var(--radix-indigo-8);
+      background: color-mix(in oklab, var(--radix-indigo-9) 22%, var(--radix-slate-3));
+      color: var(--radix-indigo-12);
+    }
+
+    .display-option-index {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 9px;
+    }
+
+    .display-divider {
+      height: 1px;
+      margin: 6px 5px 2px;
+      background: var(--panel-border);
+    }
+
+    .legend,
+    .selection-card {
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgb(0 0 0 / 0.22);
+      backdrop-filter: blur(14px);
+    }
+
+    .legend {
+      width: 178px;
+      padding: 10px 12px;
+    }
+
+    .legend-title,
+    .selection-label {
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .legend-gradient {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        var(--radix-slate-5),
+        var(--radix-indigo-7),
+        var(--radix-indigo-9),
+        var(--radix-indigo-11)
+      );
+    }
+
+    .legend-scale {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .legend-divider {
+      height: 1px;
+      margin: 9px 0;
+      background: var(--panel-border);
+    }
+
+    .node-legend-gradient {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #6e56cf, #bdee63);
+    }
+
+    .selection-card {
+      min-width: 128px;
+      padding: 10px 12px;
+    }
+
+    #selection-value {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .drop-shell {
+      position: fixed;
+      z-index: 30;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      pointer-events: none;
+      background: rgb(0 0 0 / 0.04);
+      transition: background 150ms ease;
+    }
+
+    .drop-shell.is-dragging {
+      pointer-events: auto;
+      background: color-mix(in oklab, var(--color-primary) 18%, rgb(0 0 0 / 0.42));
+    }
+
+    .drop-shell.is-dragging::before {
+      position: absolute;
+      inset: 18px;
+      border: 2px dashed color-mix(in oklab, var(--color-primary) 72%, white);
+      border-radius: 24px;
+      content: "";
+    }
+
+    .drop-alert {
+      width: min(580px, calc(100vw - 48px));
+      pointer-events: auto;
+      border: 1px solid var(--panel-border);
+      box-shadow: 0 22px 70px rgb(0 0 0 / 0.35);
+    }
+
+    .drop-copy {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .drop-title {
+      font-weight: 800;
+    }
+
+    .drop-description {
+      margin-top: 2px;
+      color: color-mix(in oklab, currentColor 72%, transparent);
+      font-size: 12px;
+    }
+
+    .status-region {
+      position: fixed;
+      z-index: 40;
+      top: 118px;
+      right: 16px;
+      width: min(430px, calc(100vw - 32px));
+      pointer-events: none;
+    }
+
+    .status-region .alert {
+      pointer-events: auto;
+      box-shadow: 0 14px 40px rgb(0 0 0 / 0.28);
+    }
+
+    .radial-inspector {
+      position: fixed;
+      z-index: 35;
+      display: none;
+      width: 350px;
+      max-width: calc(100vw - 20px);
+      padding: 10px 12px 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      background: color-mix(in oklab, var(--color-base-200) 94%, transparent);
+      box-shadow: 0 18px 60px rgb(0 0 0 / 0.38);
+      pointer-events: none;
+      backdrop-filter: blur(16px);
+    }
+
+    .radial-inspector.is-visible {
+      display: block;
+    }
+
+    .radial-inspector.is-feature {
+      width: 430px;
+    }
+
+    .inspector-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 2px;
+    }
+
+    #inspector-title {
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    #inspector-stage {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    #radial-chart {
+      display: block;
+      width: 326px;
+      height: 272px;
+      overflow: visible;
+    }
+
+    .radial-inspector.is-feature #radial-chart {
+      width: 406px;
+      height: 248px;
+    }
+
+    #inspector-value {
+      min-height: 18px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10px;
+      text-align: center;
+    }
+
+    #inspector-values {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 3px 7px;
+      max-height: 92px;
+      margin-top: 6px;
+      overflow: hidden;
+      color: color-mix(in oklab, var(--color-base-content) 76%, transparent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 8px;
+      line-height: 1.25;
+    }
+
+    .inspector-component {
+      display: flex;
+      justify-content: space-between;
+      gap: 5px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .inspector-component.is-selected-feature {
+      border-radius: 4px;
+      background: color-mix(in oklab, var(--radix-lime-9, #bdee63) 14%, transparent);
+      color: var(--radix-indigo-12);
+      font-weight: 800;
+    }
+
+    .component-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .component-value {
+      flex: none;
+      color: var(--color-base-content);
+    }
+
+    .radial-inspector.is-feature #inspector-values {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px 18px;
+      max-height: none;
+      font-size: 9px;
+    }
+
+    .radial-inspector.is-feature .component-name {
+      overflow: visible;
+      text-overflow: clip;
+    }
+
+    .edge-tooltip {
+      position: fixed;
+      z-index: 36;
+      display: none;
+      padding: 6px 8px;
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      background: var(--color-base-100);
+      box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px;
+      pointer-events: none;
+    }
+
+    .edge-tooltip.is-visible {
+      display: block;
+    }
+
+    .graph-edge {
+      stroke: var(--edge);
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+      transition: opacity 150ms ease, stroke 150ms ease, stroke-width 150ms ease;
+    }
+
+    .attention-edge {
+      stroke-linecap: round;
+      pointer-events: stroke;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .attention-arrowhead {
+      pointer-events: none;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .physics-ghost {
+      pointer-events: none;
+    }
+
+    .ghost-field-halo,
+    .ghost-coupling-band {
+      filter: url(#physics-blur);
+      vector-effect: non-scaling-stroke;
+    }
+
+    .ghost-coupling-band,
+    .ghost-coupling-core {
+      stroke-linecap: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .ghost-field-label,
+    .ghost-coupling-label {
+      fill: var(--color-base-content);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      paint-order: stroke;
+      stroke: var(--color-base-300);
+      stroke-linejoin: round;
+      text-anchor: middle;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .ghost-field-label {
+      font-size: 9px;
+      font-weight: 650;
+      stroke-width: 3px;
+    }
+
+    .ghost-coupling-label {
+      font-size: 9px;
+      font-weight: 750;
+      stroke-width: 3.5px;
+    }
+
+    .graph-node {
+      cursor: pointer;
+    }
+
+    .node-halo,
+    .node-disc {
+      vector-effect: non-scaling-stroke;
+      transition: fill 150ms ease, stroke 150ms ease, opacity 150ms ease;
+    }
+
+    .node-halo {
+      fill: transparent;
+      stroke: transparent;
+      stroke-width: 4;
+    }
+
+    .node-disc {
+      stroke: color-mix(in oklab, var(--color-base-content) 58%, transparent);
+      stroke-width: 1.5;
+    }
+
+    .node-label {
+      fill: var(--color-base-content);
+      font-size: 11px;
+      font-weight: 800;
+      text-anchor: middle;
+      dominant-baseline: central;
+      pointer-events: none;
+      paint-order: stroke;
+      stroke: rgb(0 0 0 / 0.72);
+      stroke-width: 3px;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .empty-hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 720px) {
+      .top-overlay {
+        top: 8px;
+        width: calc(100vw - 16px);
+        border-radius: 14px;
+      }
+
+      .control-row {
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .control-row > .join:last-child {
+        grid-column: 1 / -1;
+        justify-self: end;
+      }
+
+      .meta-row {
+        flex-wrap: wrap;
+      }
+
+      #trace-meta {
+        flex-basis: 100%;
+      }
+
+      .corner-tools {
+        right: 8px;
+        bottom: 8px;
+      }
+
+      .display-panel {
+        top: 164px;
+        bottom: 8px;
+        left: 8px;
+        width: 158px;
+      }
+
+      .feature-panel {
+        left: 174px;
+      }
+
+      .legend {
+        width: 150px;
+      }
+
+      .radial-inspector {
+        width: min(350px, calc(100vw - 16px));
+      }
+
+      #radial-chart {
+        width: 100%;
+        height: 250px;
+      }
+
+      .radial-inspector.is-feature {
+        width: min(430px, calc(100vw - 16px));
+      }
+
+      .radial-inspector.is-feature #radial-chart {
+        width: 100%;
+        height: 238px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main id="app" aria-label="GNN interpretation trace viewer">
+    <svg id="graph" role="img" aria-label="Message-passing lattice graph"></svg>
+
+    <section class="top-overlay" aria-label="Trace controls">
+      <div class="control-row">
+        <div class="join" aria-label="Stage navigation">
+          <button id="previous-stage" class="btn btn-sm join-item" type="button" disabled aria-label="Previous stage">←</button>
+          <button id="next-stage" class="btn btn-sm join-item" type="button" disabled aria-label="Next stage">→</button>
+        </div>
+        <div id="stage-slider-wrap" class="stage-slider-wrap" aria-label="GNN stage">
+          <output id="stage-bubble" class="stage-bubble" for="stage-slider">No trace</output>
+          <div id="stage-ticks" class="stage-ticks" aria-hidden="true"></div>
+          <input id="stage-slider" class="stage-slider" type="range" min="0" max="0" step="1" value="0" disabled aria-label="GNN stage" aria-valuetext="No trace">
+        </div>
+        <div class="join">
+          <button id="gradient-mode" class="btn btn-sm join-item" type="button" disabled aria-pressed="false" title="Load a trace containing derivative data">Grad</button>
+          <button id="reset-view" class="btn btn-sm join-item" type="button" disabled>Reset view</button>
+          <button id="replace-file" class="btn btn-sm btn-primary join-item" type="button">Open trace</button>
+        </div>
+      </div>
+      <div class="meta-row">
+        <div id="trace-meta">No trace loaded</div>
+        <label class="mode-control" for="value-mode">
+          Vector view
+          <select id="value-mode" class="select select-sm" disabled>
+            <option value="magnitude">Magnitude</option>
+            <option value="real">Real</option>
+            <option value="imaginary">Imaginary</option>
+            <option value="phase">Phase</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <aside id="display-panel" class="display-panel" aria-label="Node display selector">
+      <div class="display-panel-head">
+        <div class="display-panel-title">Node display</div>
+        <div id="display-panel-help" class="display-panel-help">Load a trace to choose an aggregate or hidden component.</div>
+      </div>
+      <div id="display-options" class="display-options">
+        <span class="empty-hint">No hidden features</span>
+      </div>
+    </aside>
+
+    <aside id="feature-panel" class="display-panel feature-panel" aria-label="Derivative input selector" aria-hidden="true">
+      <div class="display-panel-head">
+        <div class="display-panel-title">Derivative input</div>
+        <div id="feature-panel-help" class="display-panel-help">Choose the input to differentiate with respect to.</div>
+      </div>
+      <div id="feature-options" class="display-options">
+        <span class="empty-hint">No derivatives</span>
+      </div>
+    </aside>
+
+    <aside class="corner-tools" aria-label="Graph status and legend">
+      <div class="legend" aria-label="Color legend">
+        <div id="node-legend-title" class="legend-title">Node activity · all layers</div>
+        <div id="node-legend-gradient" class="node-legend-gradient"></div>
+        <div class="legend-scale"><span id="node-legend-min">Low</span><span id="node-legend-max">High</span></div>
+        <div class="legend-divider"></div>
+        <div id="legend-title" class="legend-title">Vector magnitude</div>
+        <div id="legend-gradient" class="legend-gradient"></div>
+        <div class="legend-scale"><span id="legend-min">0</span><span id="legend-max">1</span></div>
+      </div>
+      <div class="selection-card" aria-live="polite">
+        <div id="selection-label" class="selection-label">Selected node</div>
+        <div id="selection-value">None</div>
+      </div>
+    </aside>
+
+    <section id="drop-shell" class="drop-shell" aria-label="Trace file drop zone">
+      <div id="drop-alert" role="alert" class="alert alert-info alert-soft drop-alert">
+        <span aria-hidden="true">◉</span>
+        <div class="drop-copy">
+          <div class="drop-title">Drop an interpretation trace JSON</div>
+          <div class="drop-description">The trace stays in this browser tab and is never uploaded.</div>
+        </div>
+        <button id="choose-file" class="btn btn-sm btn-primary" type="button">Choose file</button>
+      </div>
+    </section>
+
+    <div id="status-region" class="status-region" aria-live="polite"></div>
+
+    <aside id="radial-inspector" class="radial-inspector" aria-label="Node vector inspector">
+      <div class="inspector-head">
+        <div id="inspector-title">Node</div>
+        <div id="inspector-stage">Input</div>
+      </div>
+      <svg id="radial-chart" role="img" aria-label="Radial vector chart"></svg>
+      <div id="inspector-value">Vector summary</div>
+      <div id="inspector-values" aria-label="Exact component values"></div>
+    </aside>
+
+    <div id="edge-tooltip" class="edge-tooltip"></div>
+    <input id="file-input" type="file" accept=".json,application/json" hidden>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      if (!window.d3) {
+        const title = document.querySelector(".drop-title");
+        const description = document.querySelector(".drop-description");
+        const alert = document.getElementById("drop-alert");
+        title.textContent = "D3 could not be loaded";
+        description.textContent = "Check your internet connection and reload this page.";
+        alert.classList.remove("alert-info");
+        alert.classList.add("alert-error");
+        return;
+      }
+
+      const FEATURE_NAMES = [
+        "top",
+        "bottom",
+        "left",
+        "right",
+        "field",
+        "coupling_top",
+        "coupling_bottom",
+        "coupling_left",
+        "coupling_right"
+      ];
+
+      const RADIX = {
+        slate3: "#212225",
+        slate5: "#2e3135",
+        slate7: "#43484e",
+        slate11: "#b0b4ba",
+        indigo7: "#3a4f97",
+        indigo9: "#3e63dd",
+        indigo11: "#9eb1ff",
+        blue7: "#205d9e",
+        blue9: "#0090ff",
+        blue11: "#70b8ff",
+        cyan9: "#00a2c7",
+        cyan11: "#4ccce6",
+        orange7: "#7e451d",
+        orange9: "#f76b15",
+        orange11: "#ffa057",
+        red9: "#e5484d",
+        red11: "#ff9592",
+        purple9: "#8e4ec6",
+        purple11: "#d19dff",
+        violet9: "#6e56cf",
+        lime9: "#bdee63"
+      };
+
+      const state = {
+        trace: null,
+        fileName: "",
+        stage: 0,
+        mode: "magnitude",
+        displaySelection: { kind: "aggregate", feature: null },
+        gradientMode: false,
+        gradientInputKind: "feature",
+        gradientFeature: 0,
+        attentionTarget: null,
+        nodeColorDomain: { low: 0, high: 1 },
+        selectedSite: null,
+        nodeRadius: 26,
+        nodes: [],
+        edges: [],
+        scales: null,
+        dragDepth: 0
+      };
+
+      const els = {
+        graph: document.getElementById("graph"),
+        stageSliderWrap: document.getElementById("stage-slider-wrap"),
+        stageSlider: document.getElementById("stage-slider"),
+        stageBubble: document.getElementById("stage-bubble"),
+        stageTicks: document.getElementById("stage-ticks"),
+        previous: document.getElementById("previous-stage"),
+        next: document.getElementById("next-stage"),
+        reset: document.getElementById("reset-view"),
+        gradientMode: document.getElementById("gradient-mode"),
+        replace: document.getElementById("replace-file"),
+        choose: document.getElementById("choose-file"),
+        input: document.getElementById("file-input"),
+        meta: document.getElementById("trace-meta"),
+        mode: document.getElementById("value-mode"),
+        displayPanelHelp: document.getElementById("display-panel-help"),
+        displayOptions: document.getElementById("display-options"),
+        featurePanel: document.getElementById("feature-panel"),
+        featurePanelHelp: document.getElementById("feature-panel-help"),
+        featureOptions: document.getElementById("feature-options"),
+        dropShell: document.getElementById("drop-shell"),
+        dropAlert: document.getElementById("drop-alert"),
+        status: document.getElementById("status-region"),
+        selectionLabel: document.getElementById("selection-label"),
+        selection: document.getElementById("selection-value"),
+        nodeLegendTitle: document.getElementById("node-legend-title"),
+        nodeLegendGradient: document.getElementById("node-legend-gradient"),
+        nodeLegendMin: document.getElementById("node-legend-min"),
+        nodeLegendMax: document.getElementById("node-legend-max"),
+        legendTitle: document.getElementById("legend-title"),
+        legendGradient: document.getElementById("legend-gradient"),
+        legendMin: document.getElementById("legend-min"),
+        legendMax: document.getElementById("legend-max"),
+        inspector: document.getElementById("radial-inspector"),
+        inspectorTitle: document.getElementById("inspector-title"),
+        inspectorStage: document.getElementById("inspector-stage"),
+        inspectorValue: document.getElementById("inspector-value"),
+        inspectorValues: document.getElementById("inspector-values"),
+        radialChart: document.getElementById("radial-chart"),
+        edgeTooltip: document.getElementById("edge-tooltip")
+      };
+
+      const svg = d3.select(els.graph);
+      const defs = svg.append("defs");
+      const gridPattern = defs.append("pattern")
+        .attr("id", "small-grid")
+        .attr("width", 34)
+        .attr("height", 34)
+        .attr("patternUnits", "userSpaceOnUse");
+      gridPattern.append("path")
+        .attr("d", "M 34 0 L 0 0 0 34")
+        .attr("fill", "none")
+        .attr("stroke", "currentColor")
+        .attr("stroke-width", 0.55);
+      const physicsBlur = defs.append("filter")
+        .attr("id", "physics-blur")
+        .attr("x", "-60%")
+        .attr("y", "-60%")
+        .attr("width", "220%")
+        .attr("height", "220%");
+      physicsBlur.append("feGaussianBlur").attr("stdDeviation", 7);
+      const attentionArrow = defs.append("marker")
+        .attr("id", "attention-arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 9)
+        .attr("refY", 0)
+        .attr("markerWidth", 10)
+        .attr("markerHeight", 10)
+        .attr("markerUnits", "userSpaceOnUse")
+        .attr("orient", "auto");
+      attentionArrow.append("path")
+        .attr("d", "M 0 -4.5 L 9 0 L 0 4.5 Z")
+        .attr("fill", RADIX.cyan11)
+        .attr("stroke", RADIX.cyan11)
+        .attr("stroke-width", 0.5);
+      svg.append("rect")
+        .attr("class", "background-grid")
+        .attr("width", "100%")
+        .attr("height", "100%")
+        .attr("fill", "url(#small-grid)");
+
+      const zoomRoot = svg.append("g").attr("class", "zoom-root");
+      const ghostLayer = zoomRoot.append("g").attr("class", "physics-ghost");
+      const ghostBondLayer = ghostLayer.append("g").attr("class", "ghost-bonds");
+      const ghostNodeLayer = ghostLayer.append("g").attr("class", "ghost-fields");
+      const edgeLayer = zoomRoot.append("g").attr("class", "edge-layer");
+      const attentionLayer = zoomRoot.append("g").attr("class", "attention-layer");
+      const nodeLayer = zoomRoot.append("g").attr("class", "node-layer");
+
+      const zoom = d3.zoom()
+        .scaleExtent([0.35, 5])
+        .on("zoom", (event) => zoomRoot.attr("transform", event.transform));
+      svg.call(zoom).on("dblclick.zoom", null);
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message);
+      }
+
+      function isPositiveInteger(value) {
+        return Number.isInteger(value) && value > 0;
+      }
+
+      function product(values) {
+        return values.reduce((total, value) => total * value, 1);
+      }
+
+      function validateShape(shape, label, rank) {
+        assert(Array.isArray(shape), `${label}.shape must be an array.`);
+        assert(shape.length === rank, `${label}.shape must have rank ${rank}.`);
+        shape.forEach((value, index) => {
+          assert(isPositiveInteger(value) || (index === 0 && value === 0), `${label}.shape[${index}] must be a valid dimension.`);
+        });
+      }
+
+      function inspectNestedArray(values, expectedShape, label) {
+        function walk(value, depth, path) {
+          if (depth === expectedShape.length) {
+            assert(typeof value === "number" && Number.isFinite(value), `${label}${path} must be a finite number.`);
+            return;
+          }
+          assert(Array.isArray(value), `${label}${path} must be an array.`);
+          assert(value.length === expectedShape[depth], `${label}${path} must contain ${expectedShape[depth]} entries.`);
+          value.forEach((child, index) => walk(child, depth + 1, `${path}[${index}]`));
+        }
+        walk(values, 0, "");
+      }
+
+      function inspectLargeNestedArray(values, expectedShape, label) {
+        function inspectCorner(indices, cornerLabel) {
+          let value = values;
+          indices.forEach((index, depth) => {
+            assert(Array.isArray(value), `${label}${cornerLabel} must be an array at depth ${depth}.`);
+            assert(value.length === expectedShape[depth], `${label}${cornerLabel} has an invalid dimension at depth ${depth}.`);
+            value = value[index];
+          });
+          assert(typeof value === "number" && Number.isFinite(value), `${label}${cornerLabel} must be a finite number.`);
+        }
+        assert(Array.isArray(values) && values.length === expectedShape[0], `${label} has an invalid first dimension.`);
+        inspectCorner(expectedShape.map(() => 0), "[first]");
+        inspectCorner(expectedShape.map((length) => length - 1), "[last]");
+      }
+
+      function decodeNumericArray(encoded, dtype, expectedLength, label) {
+        assert(dtype === "float32" || dtype === "float64", `${label}.dtype must be float32 or float64.`);
+        let binary;
+        try {
+          binary = atob(encoded);
+        } catch (error) {
+          throw new Error(`${label}.data is not valid base64.`);
+        }
+        const bytesPerValue = dtype === "float32" ? 4 : 8;
+        assert(binary.length === expectedLength * bytesPerValue, `${label}.data has an invalid byte length.`);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return dtype === "float32"
+          ? new Float32Array(bytes.buffer)
+          : new Float64Array(bytes.buffer);
+      }
+
+      function prepareComplexArray(values, label, rank) {
+        assert(values && typeof values === "object", `${label} is required.`);
+        validateShape(values.shape, label, rank);
+        const elements = product(values.shape);
+        if (values.storage === "split_base64") {
+          assert(values.encoding === "base64-little-endian", `Unsupported ${label} encoding.`);
+          values.flatReal = decodeNumericArray(
+            values.real_data,
+            values.component_dtype,
+            elements,
+            `${label}.real_data`
+          );
+          values.flatImag = decodeNumericArray(
+            values.imag_data,
+            values.component_dtype,
+            elements,
+            `${label}.imag_data`
+          );
+          delete values.real_data;
+          delete values.imag_data;
+        } else {
+          assert(Object.prototype.hasOwnProperty.call(values, "real"), `${label}.real is required.`);
+          assert(Object.prototype.hasOwnProperty.call(values, "imag"), `${label}.imag is required.`);
+          const inspectValues = elements > 2_000_000
+            ? inspectLargeNestedArray
+            : inspectNestedArray;
+          inspectValues(values.real, values.shape, `${label}.real`);
+          inspectValues(values.imag, values.shape, `${label}.imag`);
+        }
+        return values;
+      }
+
+      function parseTrace(payload) {
+        assert(payload && typeof payload === "object" && !Array.isArray(payload), "The JSON root must be an object.");
+        assert(payload.kind === "gnnmps.message_trace", `Unsupported trace kind: ${JSON.stringify(payload.kind)}.`);
+        assert(
+          [1, 2, 3, 4].includes(payload.schema_version),
+          `Unsupported schema_version ${JSON.stringify(payload.schema_version)}; expected 1, 2, 3, or 4.`
+        );
+
+        const hidden = payload.hidden_states;
+        const jacobian = payload.hidden_state_jacobians || null;
+        const attention = payload.attention_matrices;
+        const attentionJacobian = payload.attention_jacobians || null;
+        const core = payload.readout_cores || null;
+        const coreFeatureJacobian = payload.readout_feature_jacobians || null;
+        const coreHiddenJacobian = payload.readout_hidden_jacobians || null;
+        assert(hidden && typeof hidden === "object", "hidden_states is required.");
+        assert(attention && typeof attention === "object", "attention_matrices is required.");
+        validateShape(hidden.shape, "hidden_states", 3);
+        validateShape(attention.shape, "attention_matrices", 3);
+
+        const [stageCount, siteCount, hiddenDim] = hidden.shape;
+        const [transitionCount, attentionSources, attentionTargets] = attention.shape;
+        assert(stageCount >= 1, "hidden_states must contain at least the Input stage.");
+        assert(siteCount >= 1, "hidden_states must contain at least one site.");
+        assert(hiddenDim >= FEATURE_NAMES.length, `The initial state needs at least ${FEATURE_NAMES.length} feature channels.`);
+        assert(transitionCount === stageCount - 1, "attention_matrices must contain exactly one transition per hidden stage.");
+        assert(attentionSources === siteCount && attentionTargets === siteCount, "Each attention matrix must be site_count × site_count.");
+
+        assert(Object.prototype.hasOwnProperty.call(hidden, "real"), "hidden_states.real is required.");
+        assert(Object.prototype.hasOwnProperty.call(hidden, "imag"), "hidden_states.imag is required, including for real-valued traces.");
+        assert(Object.prototype.hasOwnProperty.call(attention, "values"), "attention_matrices.values is required.");
+        inspectNestedArray(hidden.real, hidden.shape, "hidden_states.real");
+        inspectNestedArray(hidden.imag, hidden.shape, "hidden_states.imag");
+        inspectNestedArray(attention.values, attention.shape, "attention_matrices.values");
+
+        let featureNames = FEATURE_NAMES;
+        if (jacobian) {
+          validateShape(jacobian.shape, "hidden_state_jacobians", 5);
+          const [jacobianStages, outputSites, jacobianHidden, inputSites, featureCount] = jacobian.shape;
+          assert(jacobianStages === stageCount, "hidden_state_jacobians must align with hidden-state stages.");
+          assert(outputSites === siteCount && inputSites === siteCount, "hidden_state_jacobians site axes must match site_count.");
+          assert(jacobianHidden === hiddenDim, "hidden_state_jacobians hidden axis must match hidden_dim.");
+          const jacobianElements = product(jacobian.shape);
+          if (jacobian.storage === "split_base64") {
+            assert(jacobian.encoding === "base64-little-endian", "Unsupported hidden_state_jacobians encoding.");
+            jacobian.flatReal = decodeNumericArray(
+              jacobian.real_data,
+              jacobian.component_dtype,
+              jacobianElements,
+              "hidden_state_jacobians.real_data"
+            );
+            delete jacobian.real_data;
+            jacobian.flatImag = decodeNumericArray(
+              jacobian.imag_data,
+              jacobian.component_dtype,
+              jacobianElements,
+              "hidden_state_jacobians.imag_data"
+            );
+            delete jacobian.imag_data;
+          } else {
+            assert(Object.prototype.hasOwnProperty.call(jacobian, "real"), "hidden_state_jacobians.real is required.");
+            assert(Object.prototype.hasOwnProperty.call(jacobian, "imag"), "hidden_state_jacobians.imag is required.");
+            const inspectJacobian = jacobianElements > 2_000_000
+              ? inspectLargeNestedArray
+              : inspectNestedArray;
+            inspectJacobian(jacobian.real, jacobian.shape, "hidden_state_jacobians.real");
+            inspectJacobian(jacobian.imag, jacobian.shape, "hidden_state_jacobians.imag");
+          }
+          if (jacobian.feature_names !== undefined) {
+            assert(
+              Array.isArray(jacobian.feature_names) &&
+              jacobian.feature_names.length === featureCount &&
+              jacobian.feature_names.every((name) => typeof name === "string" && name.length > 0),
+              "hidden_state_jacobians.feature_names must name every feature."
+            );
+            featureNames = jacobian.feature_names.slice();
+          } else {
+            featureNames = d3.range(featureCount).map((index) => FEATURE_NAMES[index] || `feature_${index}`);
+          }
+        }
+        if (attentionJacobian) {
+          validateShape(attentionJacobian.shape, "attention_jacobians", 5);
+          const [jacobianSteps, sources, targets, inputSites, featureCount] = attentionJacobian.shape;
+          assert(jacobianSteps === transitionCount, "attention_jacobians must align with attention steps.");
+          assert(
+            sources === siteCount && targets === siteCount && inputSites === siteCount,
+            "attention_jacobians site axes must match site_count."
+          );
+          assert(featureCount === featureNames.length, "attention_jacobians feature axis does not match feature_names.");
+          if (!jacobian && attentionJacobian.feature_names !== undefined) {
+            assert(
+              Array.isArray(attentionJacobian.feature_names) &&
+              attentionJacobian.feature_names.length === featureCount,
+              "attention_jacobians.feature_names must name every feature."
+            );
+            featureNames = attentionJacobian.feature_names.slice();
+          }
+          if (attentionJacobian.storage === "lattice_edges_base64") {
+            assert(attentionJacobian.encoding === "base64-little-endian", "Unsupported attention_jacobians encoding.");
+            assert(Array.isArray(attentionJacobian.edges), "attention_jacobians.edges must be an array.");
+            validateShape(attentionJacobian.stored_shape, "attention_jacobians.stored_shape", 4);
+            assert(attentionJacobian.stored_shape[0] === transitionCount, "Packed attention Jacobians have an invalid step count.");
+            assert(attentionJacobian.stored_shape[1] === attentionJacobian.edges.length, "Packed attention Jacobians have an invalid edge count.");
+            assert(attentionJacobian.stored_shape[2] === siteCount, "Packed attention Jacobians have an invalid input-site count.");
+            assert(attentionJacobian.stored_shape[3] === featureCount, "Packed attention Jacobians have an invalid feature count.");
+            attentionJacobian.edgeIndex = new Map();
+            attentionJacobian.edges.forEach((edge, index) => {
+              assert(
+                edge && Number.isInteger(edge.source) && Number.isInteger(edge.target) &&
+                edge.source >= 0 && edge.source < siteCount &&
+                edge.target >= 0 && edge.target < siteCount,
+                `attention_jacobians.edges[${index}] is invalid.`
+              );
+              attentionJacobian.edgeIndex.set(`${edge.source},${edge.target}`, index);
+            });
+            attentionJacobian.flatValues = decodeNumericArray(
+              attentionJacobian.data,
+              attentionJacobian.dtype,
+              product(attentionJacobian.stored_shape),
+              "attention_jacobians"
+            );
+            delete attentionJacobian.data;
+          } else {
+            assert(Object.prototype.hasOwnProperty.call(attentionJacobian, "values"), "attention_jacobians.values is required.");
+            const attentionElements = product(attentionJacobian.shape);
+            const inspectAttention = attentionElements > 2_000_000
+              ? inspectLargeNestedArray
+              : inspectNestedArray;
+            inspectAttention(attentionJacobian.values, attentionJacobian.shape, "attention_jacobians.values");
+          }
+        }
+        const hasAnyCoreData = core || coreFeatureJacobian || coreHiddenJacobian;
+        if (hasAnyCoreData) {
+          assert(
+            core && coreFeatureJacobian && coreHiddenJacobian,
+            "readout_cores and both readout Jacobians must be provided together."
+          );
+          prepareComplexArray(core, "readout_cores", 6);
+          prepareComplexArray(coreFeatureJacobian, "readout_feature_jacobians", 7);
+          prepareComplexArray(coreHiddenJacobian, "readout_hidden_jacobians", 7);
+          assert(core.shape[0] === siteCount, "readout_cores site axis must match site_count.");
+          assert(
+            coreFeatureJacobian.shape[0] === siteCount &&
+            coreHiddenJacobian.shape[0] === siteCount,
+            "Readout Jacobian site axes must match site_count."
+          );
+          assert(
+            core.shape.slice(1).every((size, axis) =>
+              coreFeatureJacobian.shape[axis + 1] === size &&
+              coreHiddenJacobian.shape[axis + 1] === size
+            ),
+            "Readout Jacobian tensor axes must match readout_cores."
+          );
+          if (!jacobian && !attentionJacobian && coreFeatureJacobian.feature_names !== undefined) {
+            assert(
+              Array.isArray(coreFeatureJacobian.feature_names) &&
+              coreFeatureJacobian.feature_names.length === coreFeatureJacobian.shape[6] &&
+              coreFeatureJacobian.feature_names.every((name) => typeof name === "string" && name.length > 0),
+              "readout_feature_jacobians.feature_names must name every feature."
+            );
+            featureNames = coreFeatureJacobian.feature_names.slice();
+          }
+          assert(
+            coreFeatureJacobian.shape[6] === featureNames.length,
+            "readout_feature_jacobians feature axis does not match feature_names."
+          );
+          assert(
+            coreHiddenJacobian.shape[6] === hiddenDim,
+            "readout_hidden_jacobians hidden axis must match hidden_dim."
+          );
+        }
+
+        const order = payload.site_order;
+        assert(order && order.layout === "row-major", "site_order.layout must be \"row-major\".");
+        assert(Array.isArray(order.sites) && order.sites.length === siteCount, "site_order.sites must contain one entry per site.");
+        const sites = order.sites.map((entry, index) => {
+          assert(entry && entry.site === index, `site_order.sites[${index}].site must equal ${index}.`);
+          assert(Number.isInteger(entry.row) && entry.row >= 0, `site_order.sites[${index}].row must be a non-negative integer.`);
+          assert(Number.isInteger(entry.col) && entry.col >= 0, `site_order.sites[${index}].col must be a non-negative integer.`);
+          return { site: index, row: entry.row, col: entry.col };
+        });
+        const positions = new Set(sites.map((site) => `${site.row},${site.col}`));
+        assert(positions.size === siteCount, "site_order contains duplicate row/column positions.");
+
+        const rows = d3.max(sites, (site) => site.row) + 1;
+        const cols = d3.max(sites, (site) => site.col) + 1;
+        assert(rows * cols === siteCount, "site_order must describe a complete rectangular lattice.");
+        sites.forEach((site, index) => {
+          assert(site.row * cols + site.col === index, "site_order.sites is not contiguous row-major order.");
+        });
+
+        const config = payload.model && payload.model.config ? payload.model.config : {};
+        if (config.hidden_dim !== undefined) {
+          assert(config.hidden_dim === hiddenDim, "model.config.hidden_dim does not match hidden_states.shape.");
+        }
+        if (config.message_steps !== undefined) {
+          assert(config.message_steps === transitionCount, "model.config.message_steps does not match attention_matrices.shape.");
+        }
+
+        let physics = null;
+        const sample = payload.sample;
+        if (
+          sample &&
+          Array.isArray(sample.field) &&
+          sample.couplings &&
+          Array.isArray(sample.couplings.horizontal) &&
+          Array.isArray(sample.couplings.vertical)
+        ) {
+          inspectNestedArray(sample.field, [rows, cols], "sample.field");
+          inspectNestedArray(sample.couplings.horizontal, [rows, Math.max(0, cols - 1)], "sample.couplings.horizontal");
+          inspectNestedArray(sample.couplings.vertical, [Math.max(0, rows - 1), cols], "sample.couplings.vertical");
+          const fieldValues = sample.field.flat();
+          const couplingValues = [
+            ...sample.couplings.horizontal.flat(),
+            ...sample.couplings.vertical.flat()
+          ];
+          physics = {
+            field: sample.field,
+            horizontal: sample.couplings.horizontal,
+            vertical: sample.couplings.vertical,
+            maxField: d3.max(fieldValues, (value) => Math.abs(value)) || 1,
+            maxCoupling: d3.max(couplingValues, (value) => Math.abs(value)) || 1
+          };
+        }
+
+        const hiddenStageCount = stageCount;
+        const viewStageCount = hiddenStageCount + (core ? 1 : 0);
+        const coreStage = core ? hiddenStageCount : null;
+        const coreShape = core ? core.shape.slice(1) : [];
+        const coreComponentCount = core ? product(coreShape) : 0;
+        const nodeActivities = [];
+        for (let stage = 0; stage < hiddenStageCount; stage += 1) {
+          const dimensions = stage === 0 ? FEATURE_NAMES.length : hiddenDim;
+          for (let site = 0; site < siteCount; site += 1) {
+            let total = 0;
+            for (let component = 0; component < dimensions; component += 1) {
+              total += Math.hypot(hidden.real[stage][site][component], hidden.imag[stage][site][component]);
+            }
+            nodeActivities.push(total / dimensions);
+          }
+        }
+        if (core) {
+          for (let site = 0; site < siteCount; site += 1) {
+            let total = 0;
+            for (let component = 0; component < coreComponentCount; component += 1) {
+              const value = complexArrayAt(core, [site, ...unravelIndex(component, coreShape)]);
+              total += magnitude(value);
+            }
+            nodeActivities.push(total / coreComponentCount);
+          }
+        }
+        nodeActivities.sort((left, right) => left - right);
+        const activityLow = d3.quantileSorted(nodeActivities, 0.02) ?? nodeActivities[0] ?? 0;
+        const activityHigh = d3.quantileSorted(nodeActivities, 0.98) ?? nodeActivities[nodeActivities.length - 1] ?? 1;
+
+        return {
+          payload,
+          hidden,
+          jacobian,
+          attentionJacobian,
+          core,
+          coreFeatureJacobian,
+          coreHiddenJacobian,
+          featureNames,
+          attention,
+          stageCount: viewStageCount,
+          hiddenStageCount,
+          coreStage,
+          coreShape,
+          coreComponentCount,
+          transitionCount,
+          siteCount,
+          hiddenDim,
+          rows,
+          cols,
+          sites,
+          physics,
+          nodeActivityDomain: {
+            low: activityLow,
+            high: activityHigh > activityLow ? activityHigh : activityLow + 1
+          }
+        };
+      }
+
+      function unravelIndex(index, shape) {
+        const indices = new Array(shape.length);
+        for (let axis = shape.length - 1; axis >= 0; axis -= 1) {
+          indices[axis] = index % shape[axis];
+          index = Math.floor(index / shape[axis]);
+        }
+        return indices;
+      }
+
+      function complexArrayAt(values, indices) {
+        if (values.storage === "split_base64") {
+          let offset = 0;
+          indices.forEach((index, axis) => {
+            offset = offset * values.shape[axis] + index;
+          });
+          return { real: values.flatReal[offset], imag: values.flatImag[offset] };
+        }
+        let real = values.real;
+        let imag = values.imag;
+        indices.forEach((index) => {
+          real = real[index];
+          imag = imag[index];
+        });
+        return { real, imag };
+      }
+
+      function isCoreStage(stage = state.stage) {
+        return state.trace && state.trace.coreStage !== null && stage === state.trace.coreStage;
+      }
+
+      function coreComponentAt(site, component) {
+        return complexArrayAt(
+          state.trace.core,
+          [site, ...unravelIndex(component, state.trace.coreShape)]
+        );
+      }
+
+      function complexAt(site, component, stage = state.stage) {
+        if (isCoreStage(stage)) return coreComponentAt(site, component);
+        return {
+          real: state.trace.hidden.real[stage][site][component],
+          imag: state.trace.hidden.imag[stage][site][component]
+        };
+      }
+
+      function magnitude(value) {
+        return Math.hypot(value.real, value.imag);
+      }
+
+      function phase(value) {
+        return Math.atan2(value.imag, value.real);
+      }
+
+      function projectedValue(value, mode = state.mode) {
+        if (mode === "real") return value.real;
+        if (mode === "imaginary") return value.imag;
+        if (mode === "phase") return phase(value);
+        return magnitude(value);
+      }
+
+      function componentCount() {
+        if (isCoreStage()) return state.trace.coreComponentCount;
+        return state.stage === 0 ? FEATURE_NAMES.length : state.trace.hiddenDim;
+      }
+
+      function componentName(index) {
+        if (isCoreStage()) {
+          return `T[${unravelIndex(index, state.trace.coreShape).join(",")}]`;
+        }
+        return state.stage === 0 ? FEATURE_NAMES[index] : `h${index}`;
+      }
+
+      function derivativeInputName() {
+        return state.gradientInputKind === "hidden"
+          ? `h${state.gradientFeature}`
+          : state.trace.featureNames[state.gradientFeature];
+      }
+
+      function vectorForSite(site) {
+        return d3.range(componentCount()).map((index) => ({
+          index,
+          name: componentName(index),
+          ...(state.gradientMode && isCoreStage() && state.selectedSite !== null
+            ? coreDerivativeAt(state.selectedSite, index, site, state.gradientFeature)
+            : complexAt(site, index))
+        }));
+      }
+
+      function computeScales() {
+        if (!state.trace) return null;
+        const count = componentCount();
+        const values = [];
+        for (let site = 0; site < state.trace.siteCount; site += 1) {
+          for (let component = 0; component < count; component += 1) {
+            values.push(
+              state.gradientMode && isCoreStage() && state.selectedSite !== null
+                ? coreDerivativeAt(state.selectedSite, component, site, state.gradientFeature)
+                : complexAt(site, component)
+            );
+          }
+        }
+        const maxMagnitude = d3.max(values, magnitude) || 1;
+        const maxReal = d3.max(values, (value) => Math.abs(value.real)) || 1;
+        const maxImaginary = d3.max(values, (value) => Math.abs(value.imag)) || 1;
+        return { maxMagnitude, maxReal, maxImaginary };
+      }
+
+      function normalizedLength(value) {
+        if (state.mode === "real") return Math.abs(value.real) / state.scales.maxReal;
+        if (state.mode === "imaginary") return Math.abs(value.imag) / state.scales.maxImaginary;
+        return magnitude(value) / state.scales.maxMagnitude;
+      }
+
+      function vectorColor(value) {
+        if (state.mode === "real") {
+          return d3.interpolateRgb(RADIX.red11, RADIX.blue11)(0.5 + 0.5 * value.real / state.scales.maxReal);
+        }
+        if (state.mode === "imaginary") {
+          return d3.interpolateRgb(RADIX.orange11, RADIX.purple11)(0.5 + 0.5 * value.imag / state.scales.maxImaginary);
+        }
+        if (state.mode === "phase") {
+          return d3.interpolateRgbBasis([
+            RADIX.purple9,
+            RADIX.red9,
+            RADIX.orange9,
+            RADIX.cyan9,
+            RADIX.indigo9,
+            RADIX.purple9
+          ])((phase(value) + Math.PI) / (2 * Math.PI));
+        }
+        return d3.interpolateRgbBasis([
+          RADIX.slate5,
+          RADIX.indigo7,
+          RADIX.indigo9,
+          RADIX.indigo11
+        ])(magnitude(value) / state.scales.maxMagnitude);
+      }
+
+      function attentionDerivativeAt(step, source, target, inputSite, feature) {
+        const jacobian = state.trace.attentionJacobian;
+        if (jacobian.storage !== "lattice_edges_base64") {
+          return jacobian.values[step][source][target][inputSite][feature];
+        }
+        const edge = jacobian.edgeIndex.get(`${source},${target}`);
+        if (edge === undefined) return 0;
+        const [, edgeCount, inputCount, featureCount] = jacobian.stored_shape;
+        const index = (((step * edgeCount + edge) * inputCount + inputSite) * featureCount) + feature;
+        return jacobian.flatValues[index];
+      }
+
+      function hiddenDerivativeAt(stage, outputSite, hidden, inputSite, feature) {
+        const jacobian = state.trace.jacobian;
+        if (jacobian.storage !== "split_base64") {
+          return {
+            real: jacobian.real[stage][outputSite][hidden][inputSite][feature],
+            imag: jacobian.imag[stage][outputSite][hidden][inputSite][feature]
+          };
+        }
+        const [, outputCount, hiddenCount, inputCount, featureCount] = jacobian.shape;
+        const index = (
+          ((((stage * outputCount + outputSite) * hiddenCount + hidden) * inputCount + inputSite) * featureCount)
+          + feature
+        );
+        return { real: jacobian.flatReal[index], imag: jacobian.flatImag[index] };
+      }
+
+      function corePartialAt(jacobian, outputSite, component, input) {
+        return complexArrayAt(
+          jacobian,
+          [
+            outputSite,
+            ...unravelIndex(component, state.trace.coreShape),
+            input
+          ]
+        );
+      }
+
+      function coreDerivativeAt(outputSite, component, inputSite, input) {
+        if (outputSite !== inputSite) return { real: 0, imag: 0 };
+        const jacobian = state.gradientInputKind === "hidden"
+          ? state.trace.coreHiddenJacobian
+          : state.trace.coreFeatureJacobian;
+        if (!jacobian) return { real: 0, imag: 0 };
+        return corePartialAt(jacobian, outputSite, component, input);
+      }
+
+      function componentDerivativeAt(stage, outputSite, component, inputSite, feature) {
+        if (isCoreStage(stage)) {
+          return coreDerivativeAt(outputSite, component, inputSite, feature);
+        }
+        return hiddenDerivativeAt(stage, outputSite, component, inputSite, feature);
+      }
+
+      function nodeDisplayValue(site, stage = state.stage) {
+        if (state.gradientMode) {
+          if (state.displaySelection.kind === "attention") {
+            const target = state.attentionTarget;
+            if (!state.trace.attentionJacobian || !target || stage >= state.trace.transitionCount) return null;
+            return projectedValue({
+              real: attentionDerivativeAt(stage, target.source, target.target, site, state.gradientFeature),
+              imag: 0
+            });
+          }
+          const hasDerivative = isCoreStage(stage)
+            ? state.gradientInputKind === "hidden"
+              ? state.trace.coreHiddenJacobian
+              : state.trace.coreFeatureJacobian
+            : state.trace.jacobian;
+          if (!hasDerivative || state.selectedSite === null || state.displaySelection.kind !== "feature") return null;
+          const component = state.displaySelection.feature;
+          const feature = state.gradientFeature;
+          return projectedValue(
+            componentDerivativeAt(stage, state.selectedSite, component, site, feature)
+          );
+        }
+
+        if (state.displaySelection.kind === "feature") {
+          if (stage === 0) return null;
+          const component = state.displaySelection.feature;
+          if (isCoreStage(stage)) {
+            if (component >= state.trace.coreComponentCount) return null;
+            return projectedValue(coreComponentAt(site, component));
+          }
+          if (component >= state.trace.hiddenDim) return null;
+          return projectedValue(complexAt(site, component, stage));
+        }
+
+        const dimensions = isCoreStage(stage)
+          ? state.trace.coreComponentCount
+          : stage === 0 ? FEATURE_NAMES.length : state.trace.hiddenDim;
+        let realTotal = 0;
+        let imaginaryTotal = 0;
+        let magnitudeTotal = 0;
+        for (let component = 0; component < dimensions; component += 1) {
+          const value = complexAt(site, component, stage);
+          realTotal += value.real;
+          imaginaryTotal += value.imag;
+          magnitudeTotal += magnitude(value);
+        }
+        if (state.mode === "real") return realTotal / dimensions;
+        if (state.mode === "imaginary") return imaginaryTotal / dimensions;
+        if (state.mode === "phase") return Math.atan2(imaginaryTotal, realTotal);
+        return magnitudeTotal / dimensions;
+      }
+
+      function computeNodeColorDomain() {
+        const values = [];
+        if (state.gradientMode && state.displaySelection.kind === "attention") {
+          const target = state.attentionTarget;
+          if (state.trace.attentionJacobian && target && state.stage < state.trace.transitionCount) {
+            for (let inputSite = 0; inputSite < state.trace.siteCount; inputSite += 1) {
+              values.push(projectedValue({
+                real: attentionDerivativeAt(
+                  state.stage,
+                  target.source,
+                  target.target,
+                  inputSite,
+                  state.gradientFeature
+                ),
+                imag: 0
+              }));
+            }
+          }
+        } else if (state.gradientMode && state.displaySelection.kind === "feature") {
+          const component = state.displaySelection.feature;
+          const feature = state.gradientFeature;
+          const firstDerivativeStage = isCoreStage() ? state.trace.coreStage : 0;
+          const lastDerivativeStage = isCoreStage()
+            ? state.trace.coreStage + 1
+            : state.trace.hiddenStageCount;
+          for (let stage = firstDerivativeStage; stage < lastDerivativeStage; stage += 1) {
+            const hasDerivative = isCoreStage(stage)
+              ? state.gradientInputKind === "hidden"
+                ? state.trace.coreHiddenJacobian
+                : state.trace.coreFeatureJacobian
+              : state.trace.jacobian;
+            const componentLimit = isCoreStage(stage)
+              ? state.trace.coreComponentCount
+              : state.trace.hiddenDim;
+            if (!hasDerivative || component >= componentLimit) continue;
+            for (let outputSite = 0; outputSite < state.trace.siteCount; outputSite += 1) {
+              for (let inputSite = 0; inputSite < state.trace.siteCount; inputSite += 1) {
+                values.push(projectedValue(
+                  componentDerivativeAt(stage, outputSite, component, inputSite, feature)
+                ));
+              }
+            }
+          }
+        }
+        const firstStage = state.displaySelection.kind === "feature"
+          ? isCoreStage() ? state.trace.coreStage : 1
+          : 0;
+        const lastStage = state.displaySelection.kind === "feature" && isCoreStage()
+          ? state.trace.coreStage + 1
+          : state.trace.stageCount;
+        if (!state.gradientMode) {
+          for (let stage = firstStage; stage < lastStage; stage += 1) {
+            for (let site = 0; site < state.trace.siteCount; site += 1) {
+              const value = nodeDisplayValue(site, stage);
+              if (value !== null && Number.isFinite(value)) values.push(value);
+            }
+          }
+        }
+        if (state.mode === "phase") return { low: -Math.PI, high: Math.PI };
+        if (!values.length) return { low: 0, high: 1 };
+        if (state.mode === "real" || state.mode === "imaginary") {
+          const absolute = values.map(Math.abs).sort((left, right) => left - right);
+          const maximum = d3.quantileSorted(absolute, 0.98) || 1;
+          return { low: -maximum, high: maximum };
+        }
+        values.sort((left, right) => left - right);
+        const low = d3.quantileSorted(values, 0.02) ?? values[0];
+        const high = d3.quantileSorted(values, 0.98) ?? values[values.length - 1];
+        return { low, high: high > low ? high : low + 1 };
+      }
+
+      function nodeDisplayRatio(site) {
+        const value = nodeDisplayValue(site);
+        if (value === null) return null;
+        const { low, high } = state.nodeColorDomain;
+        return Math.max(0, Math.min(1, (value - low) / (high - low)));
+      }
+
+      function nodeDisplayColor(site) {
+        const ratio = nodeDisplayRatio(site);
+        if (ratio === null) return RADIX.slate5;
+        if (state.mode === "real") return d3.interpolateRgb(RADIX.red11, RADIX.blue11)(ratio);
+        if (state.mode === "imaginary") return d3.interpolateRgb(RADIX.orange11, RADIX.purple11)(ratio);
+        if (state.mode === "phase") {
+          return d3.interpolateRgbBasis([
+            RADIX.purple9,
+            RADIX.red9,
+            RADIX.orange9,
+            RADIX.cyan9,
+            RADIX.indigo9,
+            RADIX.purple9
+          ])(ratio);
+        }
+        return d3.interpolateHcl(RADIX.violet9, RADIX.lime9)(ratio);
+      }
+
+      function buildEdges(nodes) {
+        const byPosition = new Map(nodes.map((node) => [`${node.row},${node.col}`, node]));
+        const edges = [];
+        nodes.forEach((node) => {
+          [[0, 1], [1, 0]].forEach(([rowDelta, colDelta]) => {
+            const neighbor = byPosition.get(`${node.row + rowDelta},${node.col + colDelta}`);
+            if (neighbor) edges.push({ source: node, target: neighbor });
+          });
+        });
+        return edges;
+      }
+
+      function graphLayout() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const topInset = Math.min(170, Math.max(124, height * 0.16));
+        const bottomInset = 95;
+        const rightInset = Math.min(130, width * 0.12);
+        const panelInset = state.gradientMode ? 422 : 222;
+        const leftInset = width > 760 ? Math.max(panelInset, rightInset) : rightInset;
+        const usableWidth = Math.max(100, width - leftInset - rightInset);
+        const usableHeight = Math.max(100, height - topInset - bottomInset);
+        const xStep = state.trace.cols > 1 ? usableWidth / (state.trace.cols - 1) : 0;
+        const yStep = state.trace.rows > 1 ? usableHeight / (state.trace.rows - 1) : 0;
+        const naturalStep = Math.min(
+          xStep || Number.POSITIVE_INFINITY,
+          yStep || Number.POSITIVE_INFINITY,
+          Math.max(110, Math.min(width, height) * 0.28)
+        );
+        const step = Number.isFinite(naturalStep) ? naturalStep : 0;
+        const latticeWidth = step * Math.max(0, state.trace.cols - 1);
+        const latticeHeight = step * Math.max(0, state.trace.rows - 1);
+        const startX = leftInset + (usableWidth - latticeWidth) / 2;
+        const startY = topInset + (usableHeight - latticeHeight) / 2;
+        const radius = Math.max(18, Math.min(34, step ? step * 0.16 : Math.min(width, height) * 0.055));
+        return { width, height, startX, startY, step, radius };
+      }
+
+      function resetZoom() {
+        if (!state.trace) return;
+        svg.call(zoom.transform, d3.zoomIdentity);
+      }
+
+      function renderGraph({ resetTransform = false } = {}) {
+        if (!state.trace) {
+          ghostBondLayer.selectAll("*").remove();
+          ghostNodeLayer.selectAll("*").remove();
+          edgeLayer.selectAll("*").remove();
+          attentionLayer.selectAll("*").remove();
+          nodeLayer.selectAll("*").remove();
+          return;
+        }
+        state.scales = computeScales();
+        const layout = graphLayout();
+        state.nodeRadius = layout.radius;
+        state.nodes = state.trace.sites.map((site) => ({
+          ...site,
+          x: layout.startX + site.col * layout.step,
+          y: layout.startY + site.row * layout.step
+        }));
+        state.edges = buildEdges(state.nodes);
+        renderPhysicsGhost(layout);
+
+        const edges = edgeLayer.selectAll("line")
+          .data(state.edges, (edge) => `${edge.source.site}-${edge.target.site}`)
+          .join("line")
+          .attr("class", "graph-edge")
+          .attr("x1", (edge) => edge.source.x)
+          .attr("y1", (edge) => edge.source.y)
+          .attr("x2", (edge) => edge.target.x)
+          .attr("y2", (edge) => edge.target.y)
+          .on("pointerenter", showEdgeTooltip)
+          .on("pointermove", moveEdgeTooltip)
+          .on("pointerleave", hideEdgeTooltip);
+
+        const nodes = nodeLayer.selectAll("g.graph-node")
+          .data(state.nodes, (node) => node.site)
+          .join((enter) => {
+            const group = enter.append("g")
+              .attr("class", "graph-node")
+              .attr("role", "button")
+              .attr("tabindex", 0);
+            group.append("circle").attr("class", "node-halo");
+            group.append("circle").attr("class", "node-disc");
+            group.append("text").attr("class", "node-label");
+            return group;
+          })
+          .attr("transform", (node) => `translate(${node.x},${node.y})`)
+          .attr("aria-label", (node) => `Node ${node.site}, row ${node.row}, column ${node.col}`)
+          .on("pointerenter", showInspector)
+          .on("pointermove", moveInspector)
+          .on("pointerleave", hideInspector)
+          .on("click", (event, node) => {
+            event.stopPropagation();
+            selectNode(node.site);
+          })
+          .on("keydown", (event, node) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              selectNode(node.site);
+            }
+          });
+
+        nodes.select(".node-halo")
+          .attr("r", layout.radius + 7);
+        nodes.select(".node-disc")
+          .attr("r", layout.radius)
+          .attr("fill", (node) => nodeDisplayColor(node.site));
+        nodes.select(".node-label")
+          .text((node) => node.site);
+
+        updateAttentionStyles(edges, nodes, layout.radius);
+        if (resetTransform) resetZoom();
+      }
+
+      function signedGhostColor(value, maximum) {
+        return d3.interpolateRgb(RADIX.blue7, RADIX.orange7)(0.5 + 0.5 * value / maximum);
+      }
+
+      function signedCouplingColor(value, maximum) {
+        const intensity = Math.abs(value) / maximum;
+        return value < 0
+          ? d3.interpolateRgb(RADIX.blue7, RADIX.blue11)(intensity)
+          : d3.interpolateRgb(RADIX.orange7, RADIX.orange11)(intensity);
+      }
+
+      function couplingForEdge(edge) {
+        const physics = state.trace.physics;
+        if (!physics) return null;
+        if (edge.source.row === edge.target.row) {
+          return physics.horizontal[edge.source.row][Math.min(edge.source.col, edge.target.col)];
+        }
+        return physics.vertical[Math.min(edge.source.row, edge.target.row)][edge.source.col];
+      }
+
+      function renderPhysicsGhost(layout) {
+        const physics = state.trace.physics;
+        if (!physics) {
+          ghostBondLayer.selectAll("*").remove();
+          ghostNodeLayer.selectAll("*").remove();
+          return;
+        }
+
+        const ghostEdges = ghostBondLayer.selectAll("g.ghost-bond")
+          .data(state.edges, (edge) => `${edge.source.site}-${edge.target.site}`)
+          .join((enter) => {
+            const group = enter.append("g").attr("class", "ghost-bond");
+            group.append("line").attr("class", "ghost-coupling-band");
+            group.append("line").attr("class", "ghost-coupling-core");
+            group.append("text").attr("class", "ghost-coupling-label");
+            return group;
+          });
+
+        ghostEdges.select(".ghost-coupling-band")
+          .attr("x1", (edge) => edge.source.x)
+          .attr("y1", (edge) => edge.source.y)
+          .attr("x2", (edge) => edge.target.x)
+          .attr("y2", (edge) => edge.target.y)
+          .attr("stroke", (edge) => signedCouplingColor(couplingForEdge(edge), physics.maxCoupling))
+          .attr("stroke-width", (edge) => 12 + 12 * Math.abs(couplingForEdge(edge)) / physics.maxCoupling)
+          .attr("opacity", (edge) => 0.14 + 0.18 * Math.abs(couplingForEdge(edge)) / physics.maxCoupling);
+
+        ghostEdges.select(".ghost-coupling-core")
+          .attr("x1", (edge) => edge.source.x)
+          .attr("y1", (edge) => edge.source.y)
+          .attr("x2", (edge) => edge.target.x)
+          .attr("y2", (edge) => edge.target.y)
+          .attr("stroke", (edge) => signedCouplingColor(couplingForEdge(edge), physics.maxCoupling))
+          .attr("stroke-width", (edge) => 3 + 5 * Math.abs(couplingForEdge(edge)) / physics.maxCoupling)
+          .attr("opacity", (edge) => 0.28 + 0.38 * Math.abs(couplingForEdge(edge)) / physics.maxCoupling);
+
+        ghostEdges.select(".ghost-coupling-label")
+          .attr("x", (edge) => (edge.source.x + edge.target.x) / 2 + (edge.source.col === edge.target.col ? 14 : 0))
+          .attr("y", (edge) => (edge.source.y + edge.target.y) / 2 + (edge.source.row === edge.target.row ? -13 : 3))
+          .attr("fill", (edge) => signedCouplingColor(couplingForEdge(edge), physics.maxCoupling))
+          .attr("opacity", 0.76)
+          .text((edge) => `J ${formatNumber(couplingForEdge(edge))}`);
+
+        const ghostNodes = ghostNodeLayer.selectAll("g.ghost-field")
+          .data(state.nodes, (node) => node.site)
+          .join((enter) => {
+            const group = enter.append("g").attr("class", "ghost-field");
+            group.append("circle").attr("class", "ghost-field-halo");
+            group.append("text").attr("class", "ghost-field-label");
+            return group;
+          })
+          .attr("transform", (node) => `translate(${node.x},${node.y})`);
+
+        ghostNodes.select(".ghost-field-halo")
+          .attr("r", (node) => layout.radius * (1.75 + 0.35 * Math.abs(physics.field[node.row][node.col]) / physics.maxField))
+          .attr("fill", (node) => signedGhostColor(physics.field[node.row][node.col], physics.maxField))
+          .attr("opacity", (node) => 0.08 + 0.05 * Math.abs(physics.field[node.row][node.col]) / physics.maxField);
+
+        ghostNodes.select(".ghost-field-label")
+          .attr("y", layout.radius + 22)
+          .attr("opacity", 0.38)
+          .text((node) => `h ${formatNumber(physics.field[node.row][node.col])}`);
+      }
+
+      function activeAttentionStep() {
+        if (!state.trace || state.stage >= state.trace.transitionCount) return null;
+        return state.stage;
+      }
+
+      function attentionForEdge(edge) {
+        const attentionStep = activeAttentionStep();
+        const selectingAttention = state.gradientMode && state.displaySelection.kind === "attention";
+        if ((state.gradientMode && !selectingAttention) || attentionStep === null || state.selectedSite === null) return null;
+        let target = null;
+        if (edge.source.site === state.selectedSite) target = edge.target.site;
+        if (edge.target.site === state.selectedSite) target = edge.source.site;
+        if (target === null) return null;
+        return state.trace.attention.values[attentionStep][state.selectedSite][target];
+      }
+
+      function updateAttentionStyles(edges = edgeLayer.selectAll("line"), nodes = nodeLayer.selectAll("g.graph-node"), radius = null) {
+        const attentionStep = activeAttentionStep();
+        const selectingAttention = state.gradientMode && state.displaySelection.kind === "attention";
+        const hasSelection = (!state.gradientMode || selectingAttention) &&
+          attentionStep !== null &&
+          state.selectedSite !== null;
+        let maxOutgoing = 1;
+        if (hasSelection) {
+          maxOutgoing = d3.max(state.trace.attention.values[attentionStep][state.selectedSite]) || 1;
+        }
+
+        edges
+          .attr("x1", (edge) => edge.source.x)
+          .attr("y1", (edge) => edge.source.y)
+          .attr("x2", (edge) => edge.target.x)
+          .attr("y2", (edge) => edge.target.y)
+          .attr("marker-end", null)
+          .attr("stroke", "var(--edge)")
+          .attr("stroke-width", 2)
+          .attr("opacity", hasSelection ? 0.1 : 0.68);
+
+        const selectedEdges = hasSelection
+          ? state.edges.filter((edge) =>
+            edge.source.site === state.selectedSite || edge.target.site === state.selectedSite
+          )
+          : [];
+        const attentionLinks = attentionLayer.selectAll("g.attention-link")
+          .data(selectedEdges, (edge) => `${edge.source.site}-${edge.target.site}`)
+          .join((enter) => {
+            const group = enter.append("g").attr("class", "attention-link");
+            group.append("line").attr("class", "attention-edge");
+            group.append("path")
+              .attr("class", "attention-arrowhead")
+              .attr("d", "M 0 0 L -13 -7 L -9 0 L -13 7 Z");
+            return group;
+          });
+
+        attentionLinks.select(".attention-edge")
+          .attr("x1", (edge) => attentionEndpoint(edge, "source").x)
+          .attr("y1", (edge) => attentionEndpoint(edge, "source").y)
+          .attr("x2", (edge) => attentionEndpoint(edge, "target").x)
+          .attr("y2", (edge) => attentionEndpoint(edge, "target").y)
+          .attr("stroke", (edge) => isSelectedAttentionEdge(edge)
+            ? RADIX.lime9
+            : d3.interpolateRgb(
+              RADIX.indigo9,
+              RADIX.cyan11
+            )(Math.max(0, attentionForEdge(edge)) / maxOutgoing))
+          .attr("stroke-width", (edge) =>
+            isSelectedAttentionEdge(edge)
+              ? 7
+              : 3.5 + 10 * Math.max(0, attentionForEdge(edge)) / maxOutgoing
+          )
+          .attr("opacity", 1)
+          .on("pointerenter", showEdgeTooltip)
+          .on("pointermove", moveEdgeTooltip)
+          .on("pointerleave", hideEdgeTooltip)
+          .on("click", (event, edge) => {
+            if (!selectingAttention) return;
+            event.stopPropagation();
+            selectAttentionTarget(edge);
+          });
+
+        attentionLinks.select(".attention-arrowhead")
+          .attr("transform", (edge) => {
+            const source = attentionEndpoint(edge, "source");
+            const target = attentionEndpoint(edge, "target");
+            const angle = Math.atan2(target.y - source.y, target.x - source.x) * 180 / Math.PI;
+            return `translate(${target.x},${target.y}) rotate(${angle})`;
+          })
+          .attr("fill", (edge) => isSelectedAttentionEdge(edge)
+            ? RADIX.lime9
+            : d3.interpolateRgb(
+              RADIX.indigo9,
+              RADIX.cyan11
+            )(Math.max(0, attentionForEdge(edge)) / maxOutgoing))
+          .attr("stroke", RADIX.slate3)
+          .attr("stroke-width", 1.5)
+          .attr("opacity", 1);
+        attentionLayer.raise();
+
+        nodes.select(".node-halo")
+          .attr("stroke", (node) => node.site === state.selectedSite ? "var(--color-primary)" : "transparent")
+          .attr("opacity", (node) => node.site === state.selectedSite ? 1 : 0);
+        if (radius !== null) {
+          nodes.select(".node-halo").attr("r", radius + 7);
+        }
+        if (state.selectedSite === null) {
+          els.selection.textContent = "None";
+        } else if (state.gradientMode && state.displaySelection.kind === "attention") {
+          if (state.attentionTarget) {
+            const feature = derivativeInputName();
+            els.selection.textContent = `Attention ${state.attentionTarget.source}→${state.attentionTarget.target} · ∂/∂${feature}`;
+          } else {
+            els.selection.textContent = `Node ${state.selectedSite} · select an outgoing edge`;
+          }
+        } else if (state.gradientMode) {
+          const component = isCoreStage()
+            ? componentName(state.displaySelection.feature)
+            : `h${state.displaySelection.feature}`;
+          const feature = derivativeInputName();
+          els.selection.textContent = `Node ${state.selectedSite} · ∂${component}/∂${feature}`;
+        } else if (attentionStep === null) {
+          els.selection.textContent = isCoreStage()
+            ? `Node ${state.selectedSite} · tensor core`
+            : `Node ${state.selectedSite} · final hidden stage`;
+        } else {
+          els.selection.textContent = `Node ${state.selectedSite} · ${selectedEdges.length} outgoing → ${stageLabel(state.stage + 1)}`;
+        }
+      }
+
+      function attentionEndpoint(edge, endpoint) {
+        const weight = attentionForEdge(edge);
+        if (weight === null) {
+          const node = endpoint === "source" ? edge.source : edge.target;
+          return { x: node.x, y: node.y };
+        }
+        const selected = edge.source.site === state.selectedSite ? edge.source : edge.target;
+        const neighbor = edge.source.site === state.selectedSite ? edge.target : edge.source;
+        const dx = neighbor.x - selected.x;
+        const dy = neighbor.y - selected.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        const unitX = dx / distance;
+        const unitY = dy / distance;
+        if (endpoint === "source") {
+          const padding = state.nodeRadius + 5;
+          return {
+            x: selected.x + unitX * padding,
+            y: selected.y + unitY * padding
+          };
+        }
+        const padding = state.nodeRadius + 12;
+        return {
+          x: neighbor.x - unitX * padding,
+          y: neighbor.y - unitY * padding
+        };
+      }
+
+      function isSelectedAttentionEdge(edge) {
+        if (!state.attentionTarget) return false;
+        const other = edge.source.site === state.selectedSite ? edge.target.site : edge.source.site;
+        return state.attentionTarget.source === state.selectedSite &&
+          state.attentionTarget.target === other;
+      }
+
+      function selectAttentionTarget(edge) {
+        if (!state.gradientMode || state.displaySelection.kind !== "attention" || state.selectedSite === null) return;
+        const target = edge.source.site === state.selectedSite ? edge.target.site : edge.source.site;
+        state.attentionTarget = { source: state.selectedSite, target };
+        state.nodeColorDomain = computeNodeColorDomain();
+        refreshDisplayOptions();
+        updateLegend();
+        renderGraph();
+        hideInspector();
+        hideEdgeTooltip();
+      }
+
+      function selectNode(site) {
+        state.selectedSite = state.selectedSite === site ? null : site;
+        if (state.gradientMode && state.displaySelection.kind === "attention") {
+          state.attentionTarget = null;
+          state.nodeColorDomain = computeNodeColorDomain();
+        }
+        if (state.gradientMode) {
+          refreshDisplayOptions();
+          updateLegend();
+          renderGraph();
+          hideInspector();
+        } else {
+          updateAttentionStyles();
+        }
+      }
+
+      function setStage(stage) {
+        if (!state.trace) return;
+        state.stage = Math.max(0, Math.min(stage, state.trace.stageCount - 1));
+        if (!isCoreStage() && state.gradientInputKind === "hidden") {
+          state.gradientInputKind = "feature";
+          state.gradientFeature = 0;
+        }
+        if (isCoreStage() && state.displaySelection.kind === "attention") {
+          state.displaySelection = state.gradientMode
+            ? { kind: "feature", feature: 0 }
+            : { kind: "aggregate", feature: null };
+          state.attentionTarget = null;
+        }
+        if (state.displaySelection.kind === "feature") {
+          const limit = isCoreStage()
+            ? state.trace.coreComponentCount
+            : state.trace.hiddenDim;
+          if (state.displaySelection.feature >= limit) {
+            state.displaySelection = { kind: "feature", feature: 0 };
+          }
+        }
+        state.scales = computeScales();
+        els.previous.disabled = state.stage === 0;
+        els.next.disabled = state.stage === state.trace.stageCount - 1;
+        const denominator = Math.max(1, state.trace.stageCount - 1);
+        const ratio = state.stage / denominator;
+        els.stageSlider.value = String(state.stage);
+        els.stageSlider.setAttribute("aria-valuetext", stageLabel());
+        els.stageSliderWrap.style.setProperty("--stage-progress", `${ratio * 100}%`);
+        els.stageSliderWrap.style.setProperty("--stage-ratio", String(ratio));
+        els.stageBubble.textContent = stageLabel();
+        Array.from(els.stageTicks.children).forEach((tick, index) => {
+          tick.classList.toggle("is-passed", index <= state.stage);
+          tick.classList.toggle("is-current", index === state.stage);
+        });
+        renderDisplayOptions();
+        renderFeatureOptions();
+        updateLegend();
+        renderGraph();
+        hideInspector();
+        hideEdgeTooltip();
+      }
+
+      function stageLabel(stage = state.stage) {
+        if (isCoreStage(stage)) return "Tensor core";
+        return stage === 0 ? "Input" : `Hidden ${stage}`;
+      }
+
+      function renderStages() {
+        els.stageTicks.replaceChildren();
+        els.stageSlider.min = "0";
+        els.stageSlider.max = String(Math.max(0, state.trace.stageCount - 1));
+        els.stageSlider.step = "1";
+        els.stageSlider.disabled = state.trace.stageCount <= 1;
+        for (let stage = 0; stage < state.trace.stageCount; stage += 1) {
+          const tick = document.createElement("span");
+          tick.className = "stage-tick";
+          const ratio = state.trace.stageCount === 1 ? 0 : stage / (state.trace.stageCount - 1);
+          tick.style.left = `${ratio * 100}%`;
+          els.stageTicks.appendChild(tick);
+        }
+      }
+
+      function formatNumber(value) {
+        if (value === 0) return "0";
+        const absolute = Math.abs(value);
+        if (absolute >= 1000 || absolute < 0.001) return value.toExponential(3);
+        return value.toPrecision(5).replace(/\.?0+$/, "");
+      }
+
+      function formatComplex(value) {
+        const sign = value.imag < 0 ? "−" : "+";
+        return `${formatNumber(value.real)} ${sign} ${formatNumber(Math.abs(value.imag))}i`;
+      }
+
+      function renderDisplayOptions() {
+        els.displayOptions.replaceChildren();
+        const aggregateLabel = document.createElement("div");
+        aggregateLabel.className = "display-section-label";
+        aggregateLabel.textContent = "Aggregate vectors";
+        els.displayOptions.appendChild(aggregateLabel);
+
+        [
+          ["magnitude", "Magnitude"],
+          ["real", "Real"],
+          ["imaginary", "Imaginary"],
+          ["phase", "Phase"]
+        ].forEach(([mode, label]) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "display-option";
+          button.dataset.kind = "aggregate";
+          button.dataset.mode = mode;
+          button.innerHTML = `<span>${label}</span><span class="display-option-index">all</span>`;
+          button.addEventListener("click", () => selectDisplay({ kind: "aggregate", mode }));
+          els.displayOptions.appendChild(button);
+        });
+
+        const divider = document.createElement("div");
+        divider.className = "display-divider";
+        els.displayOptions.appendChild(divider);
+        if (state.trace.attentionJacobian && !isCoreStage()) {
+          const derivativeLabel = document.createElement("div");
+          derivativeLabel.className = "display-section-label derivative-only";
+          derivativeLabel.textContent = "Gradient target";
+          els.displayOptions.appendChild(derivativeLabel);
+          const attentionButton = document.createElement("button");
+          attentionButton.type = "button";
+          attentionButton.className = "display-option derivative-only";
+          attentionButton.dataset.kind = "attention";
+          attentionButton.innerHTML = '<span>Attention edge</span><span class="display-option-index">Aᵢⱼ</span>';
+          attentionButton.addEventListener("click", () => selectDisplay({ kind: "attention" }));
+          els.displayOptions.appendChild(attentionButton);
+          const attentionDivider = document.createElement("div");
+          attentionDivider.className = "display-divider derivative-only";
+          els.displayOptions.appendChild(attentionDivider);
+        }
+        const componentLabel = document.createElement("div");
+        componentLabel.className = "display-section-label";
+        componentLabel.textContent = isCoreStage() ? "Tensor entries" : "Hidden components";
+        els.displayOptions.appendChild(componentLabel);
+
+        const count = isCoreStage()
+          ? state.trace.coreComponentCount
+          : state.trace.hiddenDim;
+        for (let feature = 0; feature < count; feature += 1) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "display-option";
+          button.dataset.kind = "feature";
+          button.dataset.feature = String(feature);
+          const label = document.createElement("span");
+          label.textContent = isCoreStage() ? "Core entry" : "Hidden feature";
+          const index = document.createElement("span");
+          index.className = "display-option-index";
+          index.textContent = isCoreStage()
+            ? componentName(feature)
+            : `h${feature}`;
+          button.append(label, index);
+          button.addEventListener("click", () => selectDisplay({ kind: "feature", feature }));
+          els.displayOptions.appendChild(button);
+        }
+        refreshDisplayOptions();
+      }
+
+      function renderFeatureOptions() {
+        els.featureOptions.replaceChildren();
+        const featureLabel = document.createElement("div");
+        featureLabel.className = "display-section-label";
+        featureLabel.textContent = isCoreStage()
+          ? "Local readout features"
+          : "Raw input channels";
+        els.featureOptions.appendChild(featureLabel);
+        state.trace.featureNames.forEach((name, feature) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "display-option";
+          button.dataset.inputKind = "feature";
+          button.dataset.feature = String(feature);
+          const label = document.createElement("span");
+          label.textContent = name;
+          const index = document.createElement("span");
+          index.className = "display-option-index";
+          index.textContent = `${isCoreStage() ? "f" : "x"}${feature}`;
+          button.append(label, index);
+          button.addEventListener("click", () => selectGradientFeature(feature, "feature"));
+          els.featureOptions.appendChild(button);
+        });
+        if (isCoreStage() && state.trace.coreHiddenJacobian) {
+          const divider = document.createElement("div");
+          divider.className = "display-divider";
+          els.featureOptions.appendChild(divider);
+          const hiddenLabel = document.createElement("div");
+          hiddenLabel.className = "display-section-label";
+          hiddenLabel.textContent = "Local hidden state";
+          els.featureOptions.appendChild(hiddenLabel);
+          for (let hidden = 0; hidden < state.trace.hiddenDim; hidden += 1) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "display-option";
+            button.dataset.inputKind = "hidden";
+            button.dataset.feature = String(hidden);
+            const label = document.createElement("span");
+            label.textContent = "Hidden input";
+            const index = document.createElement("span");
+            index.className = "display-option-index";
+            index.textContent = `h${hidden}`;
+            button.append(label, index);
+            button.addEventListener("click", () => selectGradientFeature(hidden, "hidden"));
+            els.featureOptions.appendChild(button);
+          }
+        }
+        refreshFeatureOptions();
+      }
+
+      function refreshFeatureOptions() {
+        Array.from(els.featureOptions.querySelectorAll(".display-option")).forEach((button) => {
+          const active = button.dataset.inputKind === state.gradientInputKind &&
+            Number(button.dataset.feature) === state.gradientFeature;
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-pressed", String(active));
+        });
+        if (!state.trace || (!state.trace.jacobian && !state.trace.attentionJacobian && !state.trace.coreFeatureJacobian)) return;
+        if (state.displaySelection.kind === "attention") {
+          els.featurePanelHelp.textContent = state.attentionTarget
+            ? `Input-node influence on attention ${state.attentionTarget.source}→${state.attentionTarget.target}.`
+            : "Choose a feature, source node, and outgoing edge.";
+        } else {
+          if (isCoreStage()) {
+            const input = derivativeInputName();
+            els.featurePanelHelp.textContent = state.selectedSite === null
+              ? "Choose a local feature or hidden input and a tensor entry, then select an output node."
+              : `Showing the local readout partial with respect to ${input} at core ${state.selectedSite}.`;
+          } else {
+            els.featurePanelHelp.textContent = state.selectedSite === null
+              ? "Choose a feature, then select an output node."
+              : `Coloring input nodes by influence on output node ${state.selectedSite}.`;
+          }
+        }
+      }
+
+      function refreshDisplayOptions() {
+        Array.from(els.displayOptions.querySelectorAll(".display-option")).forEach((button) => {
+          const isAggregate = state.displaySelection.kind === "aggregate" &&
+            button.dataset.kind === "aggregate" &&
+            button.dataset.mode === state.mode;
+          const isFeature = state.displaySelection.kind === "feature" &&
+            button.dataset.kind === "feature" &&
+            Number(button.dataset.feature) === state.displaySelection.feature;
+          const isAttention = state.displaySelection.kind === "attention" &&
+            button.dataset.kind === "attention";
+          button.classList.toggle("is-active", isAggregate || isFeature || isAttention);
+          button.setAttribute("aria-pressed", String(isAggregate || isFeature || isAttention));
+        });
+        Array.from(els.displayOptions.querySelectorAll(".derivative-only")).forEach((element) => {
+          element.hidden = !state.gradientMode;
+        });
+        if (!state.trace) return;
+        if (state.gradientMode) {
+          const feature = derivativeInputName();
+          if (state.displaySelection.kind === "attention") {
+            els.displayPanelHelp.textContent = state.attentionTarget
+              ? `Showing ∂A${state.attentionTarget.source},${state.attentionTarget.target}/∂${feature}.`
+              : state.selectedSite === null
+                ? "Select a source node, then one of its outgoing attention edges."
+                : `Select an outgoing edge from node ${state.selectedSite}.`;
+          } else {
+            const component = isCoreStage()
+              ? componentName(state.displaySelection.feature)
+              : `h${state.displaySelection.feature}`;
+            els.displayPanelHelp.textContent = state.selectedSite === null
+              ? `Choose ${isCoreStage() ? "a tensor entry" : "a hidden component"} for ∂${component}/∂${feature}, then select a node.`
+              : `Showing ∂${component}/∂${feature} for output node ${state.selectedSite}.`;
+          }
+          refreshFeatureOptions();
+          return;
+        }
+        if (state.displaySelection.kind === "feature") {
+          els.displayPanelHelp.textContent = isCoreStage()
+            ? `Coloring nodes by ${componentName(state.displaySelection.feature)} · ${state.mode}.`
+            : state.stage === 0
+            ? `h${state.displaySelection.feature} begins at Hidden 1.`
+            : `Coloring nodes by h${state.displaySelection.feature} · ${state.mode}.`;
+        } else {
+          els.displayPanelHelp.textContent = `Coloring nodes by aggregate ${state.mode}.`;
+        }
+      }
+
+      function selectDisplay(selection) {
+        if (!state.trace) return;
+        if (selection.kind === "aggregate") {
+          if (state.gradientMode) setGradientMode(false);
+          state.displaySelection = { kind: "aggregate", feature: null };
+          state.mode = selection.mode;
+          els.mode.value = state.mode;
+        } else if (selection.kind === "feature") {
+          state.displaySelection = { kind: "feature", feature: selection.feature };
+          state.attentionTarget = null;
+        } else {
+          state.displaySelection = { kind: "attention", feature: null };
+          state.attentionTarget = null;
+        }
+        state.nodeColorDomain = computeNodeColorDomain();
+        refreshDisplayOptions();
+        if (
+          selection.kind === "attention" &&
+          state.stage >= state.trace.transitionCount &&
+          state.trace.transitionCount > 0
+        ) {
+          setStage(state.trace.transitionCount - 1);
+          return;
+        }
+        if (selection.kind === "feature" && state.stage === 0 && state.trace.stageCount > 1) {
+          setStage(1);
+          return;
+        }
+        updateLegend();
+        renderGraph();
+        hideInspector();
+      }
+
+      function selectGradientFeature(feature, inputKind = "feature") {
+        if (!state.trace || (!state.trace.jacobian && !state.trace.attentionJacobian && !state.trace.coreFeatureJacobian)) return;
+        state.gradientInputKind = inputKind;
+        state.gradientFeature = feature;
+        state.nodeColorDomain = computeNodeColorDomain();
+        refreshDisplayOptions();
+        updateLegend();
+        renderGraph();
+        hideInspector();
+      }
+
+      function setGradientMode(enabled) {
+        if (
+          !state.trace ||
+          (enabled && !state.trace.jacobian && !state.trace.attentionJacobian && !state.trace.coreFeatureJacobian)
+        ) return;
+        state.gradientMode = enabled;
+        els.gradientMode.classList.toggle("is-active", enabled);
+        els.gradientMode.setAttribute("aria-pressed", String(enabled));
+        els.selectionLabel.textContent = enabled ? "Output node" : "Selected node";
+        els.featurePanel.classList.toggle("is-visible", enabled);
+        els.featurePanel.setAttribute("aria-hidden", String(!enabled));
+        if (enabled && state.displaySelection.kind !== "feature" && state.displaySelection.kind !== "attention") {
+          state.displaySelection = state.trace.jacobian || state.trace.coreFeatureJacobian
+            ? { kind: "feature", feature: 0 }
+            : { kind: "attention", feature: null };
+        } else if (!enabled && state.displaySelection.kind === "attention") {
+          state.displaySelection = { kind: "aggregate", feature: null };
+          state.attentionTarget = null;
+        }
+        state.nodeColorDomain = computeNodeColorDomain();
+        refreshDisplayOptions();
+        if (enabled && state.stage === 0 && state.trace.stageCount > 1) {
+          setStage(1);
+          return;
+        }
+        updateLegend();
+        renderGraph();
+        hideInspector();
+        hideEdgeTooltip();
+      }
+
+      function updateLegend() {
+        if (!state.trace) return;
+        const displayName = state.displaySelection.kind === "feature"
+          ? isCoreStage()
+            ? componentName(state.displaySelection.feature)
+            : `h${state.displaySelection.feature}`
+          : state.displaySelection.kind === "attention"
+            ? "Attention"
+            : "Aggregate";
+        if (state.gradientMode) {
+          const feature = derivativeInputName();
+          if (state.displaySelection.kind === "attention") {
+            const edge = state.attentionTarget
+              ? `${state.attentionTarget.source}→${state.attentionTarget.target}`
+              : "select edge";
+            els.nodeLegendTitle.textContent = `∂Attention ${edge}/∂${feature}`;
+          } else {
+            const output = state.selectedSite === null ? "select output" : `output ${state.selectedSite}`;
+            els.nodeLegendTitle.textContent = `∂${displayName}/∂${feature} · ${output}`;
+          }
+        } else {
+          els.nodeLegendTitle.textContent = `${displayName} · ${state.mode} · ${isCoreStage() ? "tensor layer" : "all hidden layers"}`;
+        }
+        els.nodeLegendMin.textContent = formatNumber(state.nodeColorDomain.low);
+        els.nodeLegendMax.textContent = formatNumber(state.nodeColorDomain.high);
+        if (state.mode === "real") {
+          els.nodeLegendGradient.style.background = `linear-gradient(90deg, ${RADIX.red11}, ${RADIX.slate5}, ${RADIX.blue11})`;
+        } else if (state.mode === "imaginary") {
+          els.nodeLegendGradient.style.background = `linear-gradient(90deg, ${RADIX.orange11}, ${RADIX.slate5}, ${RADIX.purple11})`;
+        } else if (state.mode === "phase") {
+          els.nodeLegendGradient.style.background = `linear-gradient(90deg, ${RADIX.purple9}, ${RADIX.red9}, ${RADIX.orange9}, ${RADIX.cyan9}, ${RADIX.indigo9}, ${RADIX.purple9})`;
+        } else {
+          els.nodeLegendGradient.style.background = `linear-gradient(90deg, ${RADIX.violet9}, ${RADIX.lime9})`;
+        }
+        if (state.mode === "real") {
+          els.legendTitle.textContent = "Real component";
+          els.legendGradient.style.background = `linear-gradient(90deg, ${RADIX.red11}, ${RADIX.slate5}, ${RADIX.blue11})`;
+          els.legendMin.textContent = formatNumber(-state.scales.maxReal);
+          els.legendMax.textContent = formatNumber(state.scales.maxReal);
+        } else if (state.mode === "imaginary") {
+          els.legendTitle.textContent = "Imaginary component";
+          els.legendGradient.style.background = `linear-gradient(90deg, ${RADIX.orange11}, ${RADIX.slate5}, ${RADIX.purple11})`;
+          els.legendMin.textContent = formatNumber(-state.scales.maxImaginary);
+          els.legendMax.textContent = formatNumber(state.scales.maxImaginary);
+        } else if (state.mode === "phase") {
+          els.legendTitle.textContent = "Complex phase";
+          els.legendGradient.style.background = `linear-gradient(90deg, ${RADIX.purple9}, ${RADIX.red9}, ${RADIX.orange9}, ${RADIX.cyan9}, ${RADIX.indigo9}, ${RADIX.purple9})`;
+          els.legendMin.textContent = "−π";
+          els.legendMax.textContent = "π";
+        } else {
+          els.legendTitle.textContent = "Vector magnitude";
+          els.legendGradient.style.background = `linear-gradient(90deg, ${RADIX.slate5}, ${RADIX.indigo7}, ${RADIX.indigo9}, ${RADIX.indigo11})`;
+          els.legendMin.textContent = "0";
+          els.legendMax.textContent = formatNumber(state.scales.maxMagnitude);
+        }
+      }
+
+      function renderRadial(node) {
+        const chart = d3.select(els.radialChart);
+        chart.selectAll("*").remove();
+        const vector = vectorForSite(node.site);
+        const labelsAreFeatures = state.stage === 0;
+        els.inspector.classList.toggle("is-feature", labelsAreFeatures);
+        const width = els.radialChart.clientWidth || 326;
+        const height = els.radialChart.clientHeight || 272;
+        const cx = width / 2;
+        const cy = height / 2 + 2;
+        const outerRadius = Math.min(width, height) * (labelsAreFeatures ? 0.29 : 0.36);
+        const labelRadius = outerRadius + (labelsAreFeatures ? 32 : 13);
+
+        const group = chart.append("g").attr("transform", `translate(${cx},${cy})`);
+        [0.25, 0.5, 0.75, 1].forEach((fraction) => {
+          group.append("circle")
+            .attr("r", outerRadius * fraction)
+            .attr("fill", "none")
+            .attr("stroke", "currentColor")
+            .attr("stroke-opacity", fraction === 1 ? 0.22 : 0.1)
+            .attr("stroke-width", 1);
+        });
+
+        const components = group.selectAll("g.component")
+          .data(vector)
+          .join("g")
+          .attr("class", "component")
+          .attr("transform", (value) => `rotate(${value.index * 360 / vector.length - 90})`);
+
+        components.append("line")
+          .attr("x1", 0)
+          .attr("x2", outerRadius)
+          .attr("stroke", "currentColor")
+          .attr("stroke-opacity", 0.11)
+          .attr("stroke-width", 1);
+
+        components.append("line")
+          .attr("x1", 0)
+          .attr("x2", (value) => Math.max(2, normalizedLength(value) * outerRadius))
+          .attr("stroke", vectorColor)
+          .attr("stroke-width", (value) => {
+            const selected = !labelsAreFeatures &&
+              state.displaySelection.kind === "feature" &&
+              value.index === state.displaySelection.feature;
+            return selected ? 6 : labelsAreFeatures ? 4 : 2.5;
+          })
+          .attr("stroke-linecap", "round");
+
+        components.append("circle")
+          .attr("cx", (value) => Math.max(2, normalizedLength(value) * outerRadius))
+          .attr("r", (value) => {
+            const selected = !labelsAreFeatures &&
+              state.displaySelection.kind === "feature" &&
+              value.index === state.displaySelection.feature;
+            return selected ? 6 : labelsAreFeatures ? 4.5 : 3;
+          })
+          .attr("fill", vectorColor)
+          .attr("stroke", "white")
+          .attr("stroke-opacity", 0.7)
+          .attr("stroke-width", 0.8)
+          .append("title")
+          .text((value) => `${value.name}: ${formatComplex(value)}; ${state.mode} ${formatNumber(projectedValue(value))}`);
+
+        components.append("text")
+          .attr("x", labelRadius)
+          .attr("dy", "0.32em")
+          .attr("transform", (value) => {
+            const degrees = value.index * 360 / vector.length;
+            return degrees > 180 ? `rotate(180 ${labelRadius} 0)` : null;
+          })
+          .attr("text-anchor", (value) => {
+            const degrees = value.index * 360 / vector.length;
+            return degrees > 180 ? "end" : "start";
+          })
+          .attr("fill", "currentColor")
+          .attr("fill-opacity", (value) => {
+            const selected = !labelsAreFeatures &&
+              state.displaySelection.kind === "feature" &&
+              value.index === state.displaySelection.feature;
+            return selected ? 1 : labelsAreFeatures ? 0.82 : 0.55;
+          })
+          .attr("font-size", labelsAreFeatures ? 9 : 7)
+          .attr("font-family", labelsAreFeatures ? "inherit" : "ui-monospace, monospace")
+          .text((value) => value.name);
+
+        group.append("circle")
+          .attr("r", labelsAreFeatures ? 10 : 8)
+          .attr("fill", "var(--color-base-300)")
+          .attr("stroke", "var(--color-primary)")
+          .attr("stroke-width", 2);
+        group.append("text")
+          .attr("text-anchor", "middle")
+          .attr("dominant-baseline", "central")
+          .attr("fill", "currentColor")
+          .attr("font-size", 8)
+          .attr("font-weight", 800)
+          .text(node.site);
+
+        els.inspectorValue.textContent = `‖vector‖₂ ${formatNumber(Math.hypot(...vector.map(magnitude)))}`;
+        els.inspectorValues.replaceChildren(...vector.map((value) => {
+          const entry = document.createElement("span");
+          entry.className = "inspector-component";
+          if (
+            !labelsAreFeatures &&
+            state.displaySelection.kind === "feature" &&
+            value.index === state.displaySelection.feature
+          ) {
+            entry.classList.add("is-selected-feature");
+          }
+          entry.title = `${value.name}: ${formatComplex(value)}`;
+          const name = document.createElement("span");
+          name.className = "component-name";
+          name.textContent = value.name;
+          const projected = document.createElement("span");
+          projected.className = "component-value";
+          projected.textContent = formatNumber(projectedValue(value));
+          entry.append(name, projected);
+          return entry;
+        }));
+      }
+
+      function positionFloating(element, event, width, height) {
+        const gap = 18;
+        const margin = 10;
+        let left = event.clientX + gap;
+        let top = event.clientY + gap;
+        if (left + width > window.innerWidth - margin) left = event.clientX - width - gap;
+        if (top + height > window.innerHeight - margin) top = event.clientY - height - gap;
+        left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+        top = Math.max(margin, Math.min(top, window.innerHeight - height - margin));
+        element.style.left = `${left}px`;
+        element.style.top = `${top}px`;
+      }
+
+      function showInspector(event, node) {
+        els.inspectorTitle.textContent = `Node ${node.site} · row ${node.row}, col ${node.col}`;
+        els.inspectorStage.textContent = state.gradientMode && isCoreStage() && state.selectedSite !== null
+          ? `∂T${state.selectedSite}/∂${derivativeInputName()} · local readout`
+          : stageLabel();
+        els.inspector.classList.add("is-visible");
+        renderRadial(node);
+        moveInspector(event);
+      }
+
+      function moveInspector(event) {
+        if (!els.inspector.classList.contains("is-visible")) return;
+        positionFloating(els.inspector, event, els.inspector.offsetWidth, els.inspector.offsetHeight);
+      }
+
+      function hideInspector() {
+        els.inspector.classList.remove("is-visible");
+      }
+
+      function showEdgeTooltip(event, edge) {
+        const weight = attentionForEdge(edge);
+        if (weight === null) return;
+        const other = edge.source.site === state.selectedSite ? edge.target.site : edge.source.site;
+        els.edgeTooltip.textContent = `${state.selectedSite} → ${other}: ${formatNumber(weight)}`;
+        els.edgeTooltip.classList.add("is-visible");
+        moveEdgeTooltip(event);
+      }
+
+      function moveEdgeTooltip(event) {
+        if (!els.edgeTooltip.classList.contains("is-visible")) return;
+        positionFloating(els.edgeTooltip, event, els.edgeTooltip.offsetWidth, els.edgeTooltip.offsetHeight);
+      }
+
+      function hideEdgeTooltip() {
+        els.edgeTooltip.classList.remove("is-visible");
+      }
+
+      function setDropPrompt(visible) {
+        els.dropShell.style.display = visible ? "grid" : "none";
+      }
+
+      let statusTimer = null;
+      function showStatus(message, type = "info", { sticky = false } = {}) {
+        window.clearTimeout(statusTimer);
+        els.status.replaceChildren();
+        const alert = document.createElement("div");
+        alert.className = `alert alert-${type} alert-soft`;
+        alert.setAttribute("role", "alert");
+        const text = document.createElement("span");
+        text.textContent = message;
+        alert.appendChild(text);
+        if (sticky) {
+          const close = document.createElement("button");
+          close.type = "button";
+          close.className = "btn btn-xs btn-ghost";
+          close.textContent = "Dismiss";
+          close.addEventListener("click", () => els.status.replaceChildren());
+          alert.appendChild(close);
+        }
+        els.status.appendChild(alert);
+        if (!sticky) {
+          statusTimer = window.setTimeout(() => els.status.replaceChildren(), 4200);
+        }
+      }
+
+      function installTrace(trace, fileName) {
+        state.trace = trace;
+        state.fileName = fileName;
+        state.stage = 0;
+        state.selectedSite = null;
+        state.mode = "magnitude";
+        state.displaySelection = { kind: "aggregate", feature: null };
+        state.gradientMode = false;
+        state.gradientInputKind = "feature";
+        state.gradientFeature = 0;
+        state.attentionTarget = null;
+        state.nodeColorDomain = computeNodeColorDomain();
+        els.mode.value = state.mode;
+        els.mode.disabled = false;
+        els.reset.disabled = false;
+        els.gradientMode.disabled = !trace.jacobian && !trace.attentionJacobian && !trace.coreFeatureJacobian;
+        els.gradientMode.classList.remove("is-active");
+        els.gradientMode.setAttribute("aria-pressed", "false");
+        els.gradientMode.title = trace.jacobian || trace.attentionJacobian || trace.coreFeatureJacobian
+          ? "Color input nodes by hidden-state, attention, or tensor-core derivatives"
+          : "This trace does not contain feature Jacobians";
+        els.featurePanel.classList.remove("is-visible");
+        els.featurePanel.setAttribute("aria-hidden", "true");
+        els.selectionLabel.textContent = "Selected node";
+        els.selection.textContent = "None";
+        els.meta.textContent = [
+          fileName,
+          `${trace.rows}×${trace.cols} lattice`,
+          `${trace.siteCount} nodes`,
+          `${trace.hiddenDim} hidden dimensions`,
+          `${trace.transitionCount} message steps`,
+          trace.core ? `${trace.coreComponentCount} core entries` : "no tensor core",
+          trace.hidden.dtype || "numeric"
+        ].join(" · ");
+        renderStages();
+        renderDisplayOptions();
+        renderFeatureOptions();
+        setDropPrompt(false);
+        setStage(0);
+        renderGraph({ resetTransform: true });
+        showStatus(`Loaded ${fileName}: ${trace.siteCount} nodes and ${trace.transitionCount} message steps.`, "success");
+      }
+
+      async function loadFile(file) {
+        if (!file) return;
+        showStatus(`Reading ${file.name}…`, "info");
+        try {
+          let text = await readTraceText(file);
+          let payload;
+          try {
+            payload = JSON.parse(text);
+            text = null;
+          } catch (error) {
+            const size = `${(file.size / 1_000_000).toFixed(1)} MB`;
+            throw new Error(`Could not parse ${size} of JSON: ${error.message}`);
+          }
+          const trace = parseTrace(payload);
+          installTrace(trace, file.name);
+        } catch (error) {
+          showStatus(`${file.name}: ${error.message}`, "error", { sticky: true });
+          if (!state.trace) setDropPrompt(true);
+        } finally {
+          els.input.value = "";
+        }
+      }
+
+      async function loadBundledTrace() {
+        const fileName =
+          "random_couplings_random_field_gaussian_mu0p0_sigma1p0_L6_seed20260617_samples16.sample_000000.trace.json";
+        const partUrls = [
+          "./trace.json.part-00",
+          "./trace.json.part-01",
+          "./trace.json.part-02",
+          "./trace.json.part-03"
+        ];
+        const parts = [];
+
+        try {
+          for (let index = 0; index < partUrls.length; index += 1) {
+            showStatus(`Loading bundled trace (${index + 1}/${partUrls.length})…`, "info");
+            const response = await fetch(partUrls[index]);
+            if (!response.ok) {
+              throw new Error(`${response.status} ${response.statusText} for ${partUrls[index]}`);
+            }
+            parts.push(await response.blob());
+          }
+          await loadFile(new File(parts, fileName, { type: "application/json" }));
+        } catch (error) {
+          showStatus(`Could not load the bundled trace: ${error.message}`, "error", { sticky: true });
+          setDropPrompt(true);
+        }
+      }
+
+      async function readTraceText(file) {
+        const directReadLimit = 450_000_000;
+        if (file.size <= directReadLimit || !file.stream || !window.TextDecoderStream) {
+          return file.text();
+        }
+
+        showStatus(`Preparing large trace (${(file.size / 1_000_000).toFixed(1)} MB)…`, "info");
+        const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+        const chunks = [];
+        let trimLeadingIndent = false;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          let chunk = value;
+          if (trimLeadingIndent) chunk = chunk.replace(/^[ \t]+/, "");
+          trimLeadingIndent = /\r?\n$/.test(value);
+          chunks.push(chunk.replace(/\r?\n[ \t]*/g, ""));
+        }
+
+        const compact = new Blob(chunks, { type: "application/json" });
+        chunks.length = 0;
+        const safeStringLimit = 525_000_000;
+        if (compact.size > safeStringLimit) {
+          throw new Error(
+            `This trace remains ${(compact.size / 1_000_000).toFixed(1)} MB after removing indentation, ` +
+            "which is too large for the browser JSON parser."
+          );
+        }
+        return compact.text();
+      }
+
+      function openFilePicker() {
+        els.input.click();
+      }
+
+      els.choose.addEventListener("click", openFilePicker);
+      els.replace.addEventListener("click", openFilePicker);
+      els.input.addEventListener("change", () => loadFile(els.input.files[0]));
+      els.previous.addEventListener("click", () => setStage(state.stage - 1));
+      els.next.addEventListener("click", () => setStage(state.stage + 1));
+      els.stageSlider.addEventListener("input", () => setStage(Number(els.stageSlider.value)));
+      els.reset.addEventListener("click", resetZoom);
+      els.gradientMode.addEventListener("click", () => setGradientMode(!state.gradientMode));
+      els.mode.addEventListener("change", () => {
+        state.mode = els.mode.value;
+        state.scales = computeScales();
+        state.nodeColorDomain = computeNodeColorDomain();
+        refreshDisplayOptions();
+        updateLegend();
+        renderGraph();
+        hideInspector();
+      });
+
+      svg.on("click", () => {
+        if (state.selectedSite !== null) selectNode(state.selectedSite);
+      });
+
+      window.addEventListener("keydown", (event) => {
+        if (!state.trace || event.altKey || event.ctrlKey || event.metaKey) return;
+        const interactive = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+        if (interactive) return;
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setStage(state.stage - 1);
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          setStage(state.stage + 1);
+        }
+      });
+
+      window.addEventListener("resize", () => {
+        if (state.trace) renderGraph();
+        hideInspector();
+        hideEdgeTooltip();
+      });
+
+      window.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        state.dragDepth += 1;
+        els.dropShell.style.display = "grid";
+        els.dropShell.classList.add("is-dragging");
+        els.dropAlert.querySelector(".drop-title").textContent = "Release to load this trace";
+      });
+      window.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      });
+      window.addEventListener("dragleave", (event) => {
+        event.preventDefault();
+        state.dragDepth = Math.max(0, state.dragDepth - 1);
+        if (state.dragDepth === 0) {
+          els.dropShell.classList.remove("is-dragging");
+          els.dropAlert.querySelector(".drop-title").textContent = "Drop an interpretation trace JSON";
+          if (state.trace) setDropPrompt(false);
+        }
+      });
+      window.addEventListener("drop", (event) => {
+        event.preventDefault();
+        state.dragDepth = 0;
+        els.dropShell.classList.remove("is-dragging");
+        els.dropAlert.querySelector(".drop-title").textContent = "Drop an interpretation trace JSON";
+        const files = Array.from(event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : []);
+        if (files.length !== 1) {
+          showStatus("Drop exactly one JSON trace file.", "warning", { sticky: true });
+          if (state.trace) setDropPrompt(false);
+          return;
+        }
+        loadFile(files[0]);
+      });
+
+      loadBundledTrace();
+
+    })();
+  </script>
+</body>
+</html>
