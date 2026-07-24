@@ -2933,7 +2933,7 @@
           "random_couplings_random_field_gaussian_mu0p0_sigma1p0_L6_seed20260617_samples16.sample_000000.trace.json";
         const partUrls = Array.from(
           { length: 45 },
-          (_, index) => `./trace.json.gz.part-${String(index).padStart(2, "0")}`
+          (_, index) => `./gtn-data-${String(index).padStart(2, "0")}.bin`
         );
         const parts = [];
 
