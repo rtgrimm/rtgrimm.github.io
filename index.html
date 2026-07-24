@@ -2931,27 +2931,47 @@
       async function loadBundledTrace() {
         const fileName =
           "random_couplings_random_field_gaussian_mu0p0_sigma1p0_L6_seed20260617_samples16.sample_000000.trace.json";
-        const partUrls = [
-          "./trace.json.part-00",
-          "./trace.json.part-01",
-          "./trace.json.part-02",
-          "./trace.json.part-03",
-          "./trace.json.part-04",
-          "./trace.json.part-05",
-          "./trace.json.part-06"
-        ];
+        const partUrls = Array.from(
+          { length: 45 },
+          (_, index) => `./trace.json.gz.part-${String(index).padStart(2, "0")}`
+        );
         const parts = [];
 
         try {
+          if (!window.DecompressionStream) {
+            throw new Error("This browser does not support gzip decompression.");
+          }
           for (let index = 0; index < partUrls.length; index += 1) {
             showStatus(`Loading bundled trace (${index + 1}/${partUrls.length})…`, "info");
-            const response = await fetch(partUrls[index]);
+            let response;
+            try {
+              response = await fetch(partUrls[index]);
+            } catch (error) {
+              throw new Error(`${partUrls[index]}: ${error.message}`);
+            }
             if (!response.ok) {
               throw new Error(`${response.status} ${response.statusText} for ${partUrls[index]}`);
             }
             parts.push(await response.blob());
           }
-          await loadFile(new File(parts, fileName, { type: "application/json" }));
+          showStatus("Decompressing bundled trace…", "info");
+          let compressedTrace = new Blob(parts, { type: "application/gzip" });
+          parts.length = 0;
+          const decompressedResponse = new Response(
+            compressedTrace.stream().pipeThrough(new DecompressionStream("gzip"))
+          );
+          compressedTrace = null;
+
+          showStatus("Parsing bundled trace…", "info");
+          let text = await decompressedResponse.text();
+          let payload;
+          try {
+            payload = JSON.parse(text);
+            text = null;
+          } catch (error) {
+            throw new Error(`Could not parse the decompressed JSON: ${error.message}`);
+          }
+          installTrace(parseTrace(payload), fileName);
         } catch (error) {
           showStatus(`Could not load the bundled trace: ${error.message}`, "error", { sticky: true });
           setDropPrompt(true);
